@@ -24,6 +24,14 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
 
   late final AnimationController _pulseController;
 
+  // ---- Quick replies (ala UI kit premium) ----
+  static const List<String> _quickReplies = [
+    'Buat konten video',
+    'Analisis video',
+    'Buat laporan',
+    'Cek biaya',
+  ];
+
   // ---- Demo data (mirrors /opt/data/jeonchat_ui_mockup.html) ----
   final List<Agent> _agents = const [
     Agent(name: 'AI Clipper', task: 'Memotong video_umkm_02.mp4', status: AgentStatus.running),
@@ -95,8 +103,8 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
 
   int get _runningCount => _agents.where((a) => a.status == AgentStatus.running).length;
 
-  Future<void> _send() async {
-    final text = _controller.text.trim();
+  Future<void> _send([String? preset]) async {
+    final text = (preset ?? _controller.text).trim();
     if (text.isEmpty || _sending) return;
     setState(() {
       _messages = [..._messages, ChatMessage(isUser: true, text: text)];
@@ -142,12 +150,47 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       drawer: AgentDrawer(agents: _agents),
       appBar: AppBar(
         titleSpacing: 8,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: const [
-            Text('Produksi Konten UMKM', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600)),
-            Text('jeon-chat · deepseek-v4-flash', style: TextStyle(fontSize: 11, color: JeonColors.inkFaint)),
+        title: Row(
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [JeonColors.accent, JeonColors.accentDim],
+                ),
+                boxShadow: [BoxShadow(color: JeonColors.accentGlow, blurRadius: 10)],
+              ),
+              alignment: Alignment.center,
+              child: const Text('J',
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                      color: Color(0xFF04150A))),
+            ),
+            const SizedBox(width: 10),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('JeonChat', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600)),
+                Row(
+                  children: [
+                    Container(
+                      width: 6,
+                      height: 6,
+                      decoration: const BoxDecoration(shape: BoxShape.circle, color: JeonColors.accent),
+                    ),
+                    const SizedBox(width: 5),
+                    const Text('online · deepseek-v4-flash',
+                        style: TextStyle(fontSize: 11, color: JeonColors.inkFaint)),
+                  ],
+                ),
+              ],
+            ),
           ],
         ),
         actions: [
@@ -212,37 +255,65 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
 
   Widget _composer() {
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 14),
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 14),
       child: Column(
         children: [
+          // Quick reply chips (ala UI kit premium)
+          SizedBox(
+            height: 34,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 2),
+              itemCount: _quickReplies.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              itemBuilder: (context, i) {
+                final q = _quickReplies[i];
+                return GestureDetector(
+                  onTap: () => _send(q),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: JeonColors.surface2,
+                      border: Border.all(color: JeonColors.border),
+                      borderRadius: BorderRadius.circular(JeonRadius.pill),
+                    ),
+                    child: Text(q, style: const TextStyle(fontSize: 12, color: JeonColors.inkMuted)),
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 8),
           Container(
             padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
             decoration: BoxDecoration(
               color: JeonColors.surface2,
               border: Border.all(color: JeonColors.border),
-              borderRadius: BorderRadius.circular(JeonRadius.card),
+              borderRadius: BorderRadius.circular(JeonRadius.pill),
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
+                IconButton(
+                  icon: const Icon(Icons.attach_file, size: 18, color: JeonColors.inkFaint),
+                  onPressed: () {},
+                ),
                 Expanded(
                   child: TextField(
                     controller: _controller,
                     minLines: 1,
-                    maxLines: 5,
+                    maxLines: 4,
                     style: const TextStyle(fontSize: 13.4, color: JeonColors.ink),
                     decoration: const InputDecoration(
-                      hintText: 'Kirim pesan ke JeonChat…',
+                      hintText: 'Tanya JeonChat apa saja…',
                       hintStyle: TextStyle(color: JeonColors.inkFaint),
                       border: InputBorder.none,
                       isDense: true,
+                      contentPadding: EdgeInsets.symmetric(vertical: 10),
                     ),
                     onSubmitted: (_) => _send(),
                   ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.attach_file, size: 18, color: JeonColors.inkFaint),
-                  onPressed: () {},
                 ),
                 Container(
                   decoration: const BoxDecoration(color: JeonColors.accent, shape: BoxShape.circle),
@@ -257,17 +328,6 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                     onPressed: _sending ? null : _send,
                   ),
                 ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 6),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 4),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text('Model: deepseek-v4-flash', style: TextStyle(fontSize: 11, color: JeonColors.inkFaint)),
-                Text('Enter kirim', style: TextStyle(fontSize: 10.8, color: JeonColors.inkFaint)),
               ],
             ),
           ),

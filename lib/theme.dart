@@ -24,6 +24,8 @@ class JeonColors {
 class JeonRadius {
   static const card = 10.0;
   static const small = 7.0;
+  static const bubble = 16.0;
+  static const pill = 24.0;
 }
 
 ThemeData buildJeonTheme() {

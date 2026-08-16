@@ -14,11 +14,11 @@ class ChatBubble extends StatelessWidget {
     final isUser = message.isUser;
 
     final avatar = Container(
-      width: 26,
-      height: 26,
+      width: 28,
+      height: 28,
       margin: const EdgeInsets.only(top: 2),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(7),
+        shape: BoxShape.circle,
         color: isUser ? JeonColors.surface3 : null,
         border: isUser ? Border.all(color: JeonColors.border) : null,
         gradient: isUser
@@ -28,6 +28,15 @@ class ChatBubble extends StatelessWidget {
                 end: Alignment.bottomRight,
                 colors: [JeonColors.accent, JeonColors.accentDim],
               ),
+        boxShadow: isUser
+            ? null
+            : [
+                BoxShadow(
+                  color: JeonColors.accentGlow,
+                  blurRadius: 8,
+                  spreadRadius: 0,
+                ),
+              ],
       ),
       alignment: Alignment.center,
       child: Text(
@@ -45,16 +54,27 @@ class ChatBubble extends StatelessWidget {
         constraints: const BoxConstraints(maxWidth: 520),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
         decoration: BoxDecoration(
-          color: isUser ? JeonColors.surface3 : JeonColors.surface2,
-          border: Border.all(color: JeonColors.borderSoft),
-          borderRadius: BorderRadius.circular(JeonRadius.card),
+          color: isUser ? JeonColors.accent.withOpacity(0.15) : JeonColors.surface2,
+          border: Border.all(
+            color: isUser ? JeonColors.accent.withOpacity(0.3) : JeonColors.borderSoft,
+          ),
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(JeonRadius.bubble),
+            topRight: const Radius.circular(JeonRadius.bubble),
+            bottomLeft: Radius.circular(isUser ? JeonRadius.bubble : 4),
+            bottomRight: Radius.circular(isUser ? 4 : JeonRadius.bubble),
+          ),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               message.text,
-              style: const TextStyle(fontSize: 13.4, color: JeonColors.ink, height: 1.4),
+              style: TextStyle(
+                fontSize: 13.4,
+                color: isUser ? JeonColors.ink : JeonColors.ink,
+                height: 1.4,
+              ),
             ),
             if (message.toolCall != null) ToolCardWidget(toolCall: message.toolCall!),
             if (message.costChip != null || message.timeChip != null)
