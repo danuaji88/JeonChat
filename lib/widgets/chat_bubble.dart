@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../models/message.dart';
 import '../theme.dart';
@@ -68,13 +69,32 @@ class ChatBubble extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
+            SelectableText(
               message.text,
               style: TextStyle(
                 fontSize: 13.4,
                 color: isUser ? JeonColors.ink : JeonColors.ink,
                 height: 1.4,
               ),
+              contextMenuBuilder: (context, editableTextState) {
+                return AdaptiveTextSelectionToolbar(
+                  buttonItems: [
+                    ...editableTextState.contextMenuButtonItems,
+                    ContextMenuItem(
+                      onPressed: () {
+                        Clipboard.setData(ClipboardData(text: message.text));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Teks disalin ✓'),
+                            duration: Duration(seconds: 1),
+                          ),
+                        );
+                      },
+                      label: 'Salin',
+                    ),
+                  ],
+                );
+              },
             ),
             if (message.toolCall != null) ToolCardWidget(toolCall: message.toolCall!),
             if (message.costChip != null || message.timeChip != null)
