@@ -60,32 +60,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     IntegrationStatus(name: 'fal.ai', status: 'no key', online: false),
   ];
 
-  late List<ChatMessage> _messages = [
-    const ChatMessage(
-      isUser: true,
-      text: 'Potong video ini jadi 5 klip TikTok, tambahkan hook & caption, lalu buatkan gambar thumbnail untuk masing-masing.',
-    ),
-    const ChatMessage(
-      isUser: false,
-      text: 'Siap Appa Jeon — saya jalankan lewat AI Clipper dan Media Generator secara paralel. Estimasi selesai ±4 menit.',
-      toolCall: ToolCall(
-        scriptName: 'jeon_ai_clipper.py',
-        detail: 'transcribe -> detect_moments -> burn_captions -> export (3/5 klip)',
-        status: ToolCallStatus.running,
-        progressPercent: 41,
-      ),
-      costChip: 'Rp0 · gratis',
-      timeChip: '12.4s',
-    ),
-    const ChatMessage(
-      isUser: true,
-      text: 'Filter yang dipakai natural skin bright ya, dan pakai hook yang sesuai konteks video.',
-    ),
-    const ChatMessage(
-      isUser: false,
-      text: 'Dicatat — natural_skin_bright jadi default filter, dan hook dipilih otomatis dari jeon_video_text_lib.py sesuai konteks transkrip tiap klip.',
-    ),
-  ];
+  late List<ChatMessage> _messages = [];
 
   @override
   void initState() {
@@ -103,6 +78,8 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
 
   int get _runningCount => _agents.where((a) => a.status == AgentStatus.running).length;
 
+  String? _agentSession;
+
   Future<void> _send([String? preset]) async {
     final text = (preset ?? _controller.text).trim();
     if (text.isEmpty || _sending) return;
@@ -114,17 +91,41 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     _scrollToBottom();
 
     try {
-      final reply = await widget.api.sendChat(history: _messages, model: 'deepseek-v4-flash');
+      final result = await widget.api.sendAgentPrompt(
+        prompt: text,
+        agentSession: _agentSession,
+      );
+      if (result.agentSession != null) {
+        _agentSession = result.agentSession;
+      }
       setState(() {
-        _messages = [..._messages, ChatMessage(isUser: false, text: reply)];
+        _messages = [..._messages, ChatMessage(isUser: false, text: result.content)];
       });
-    } catch (e) {
+    } on AgentTimeoutException catch (e) {
       setState(() {
         _messages = [
           ..._messages,
-          ChatMessage(isUser: false, text: '⚠️ ${e.toString()}'),
+          ChatMessage(isUser: false, text: '⏳ ${e.toString()}'),
         ];
       });
+    } catch (e) {
+      // Fallback ke /chat kalau /agent gagal
+      try {
+        final reply = await widget.api.sendChat(
+          history: _messages,
+          model: 'jeon-chat',
+        );
+        setState(() {
+          _messages = [..._messages, ChatMessage(isUser: false, text: reply)];
+        });
+      } catch (e2) {
+        setState(() {
+          _messages = [
+            ..._messages,
+            ChatMessage(isUser: false, text: '⚠️ ${e2.toString()}'),
+          ];
+        });
+      }
     } finally {
       setState(() => _sending = false);
       _scrollToBottom();
