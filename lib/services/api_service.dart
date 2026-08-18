@@ -358,9 +358,13 @@ class ApiService {
   }
 
   /// Level 3: Hermes Agent penuh (semua tools & skills).
-  /// Pakai pola submit + poll untuk hindari timeout Cloudflare.
+  /// Pakai pola submit + poll untuk hindari timeout Cloudflare. [model]
+  /// dikirim ke backend supaya pilihan Fast/High/Think/Vision/Opus di input
+  /// bar juga berlaku untuk request yang lewat /agent, bukan cuma fallback
+  /// /chat.
   Future<AgentResult> sendAgentPrompt({
     required String prompt,
+    required String model,
     String? agentSession,
   }) async {
     if (!isConfigured) {
@@ -372,6 +376,7 @@ class ApiService {
     try {
       final body = {
         'prompt': prompt,
+        'model': model,
         if (agentSession != null) 'session_id': agentSession,
       };
       final res = await http
@@ -380,7 +385,7 @@ class ApiService {
 
       if (res.statusCode == 504) {
         // Timeout sync → fallback ke async
-        return await _agentSubmitPoll(prompt, agentSession);
+        return await _agentSubmitPoll(prompt, model, agentSession);
       }
       if (res.statusCode != 200) {
         throw ApiException('Agent gagal (${res.statusCode}): ${res.body}');
@@ -391,17 +396,19 @@ class ApiService {
         content: (data['content'] ?? '').toString(),
         agentSession: data['agent_session']?.toString(),
         fileUrls: fileUrls,
+        model: data['model']?.toString(),
       );
     } on AgentTimeoutException {
       // Sync timeout → fallback ke async submit+poll
-      return await _agentSubmitPoll(prompt, agentSession);
+      return await _agentSubmitPoll(prompt, model, agentSession);
     }
   }
 
-  Future<AgentResult> _agentSubmitPoll(String prompt, String? agentSession) async {
+  Future<AgentResult> _agentSubmitPoll(String prompt, String model, String? agentSession) async {
     // Submit task
     final submitBody = {
       'prompt': prompt,
+      'model': model,
       if (agentSession != null) 'session_id': agentSession,
     };
     final submitRes = await http
@@ -432,6 +439,7 @@ class ApiService {
           content: (pollData['content'] ?? '').toString(),
           agentSession: pollData['agent_session']?.toString(),
           fileUrls: fileUrls,
+          model: pollData['model']?.toString(),
         );
       }
       if (status == 'error') {
@@ -524,7 +532,8 @@ class AgentResult {
   final String content;
   final String? agentSession;
   final List<String> fileUrls;
-  AgentResult({required this.content, this.agentSession, this.fileUrls = const []});
+  final String? model;
+  AgentResult({required this.content, this.agentSession, this.fileUrls = const [], this.model});
 }
 
 class AgentTimeoutException implements Exception {

@@ -571,6 +571,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     try {
       final result = await widget.api.sendAgentPrompt(
         prompt: text,
+        model: model,
         agentSession: _agentSession,
       );
       if (result.agentSession != null) {
