@@ -59,6 +59,12 @@ class JeonChatInputBar extends StatefulWidget {
   /// lewat ApiService.speechToText() — hasilnya diisi balik ke text field.
   final Future<String> Function(String base64Audio) onSpeechToText;
 
+  /// Toggle "Voice mode" (biru saat aktif) — state disimpan parent karena
+  /// dipakai buat memutuskan apakah SETIAP balasan AI (bukan cuma dari mode
+  /// dengar sekali via [onVoiceModeResult]) otomatis dibacakan lewat /tts.
+  final bool voiceModeEnabled;
+  final VoidCallback? onToggleVoiceMode;
+
   const JeonChatInputBar({
     super.key,
     required this.onSend,
@@ -77,6 +83,8 @@ class JeonChatInputBar extends StatefulWidget {
     this.onOpenPlugins,
     this.onOpenCodeInterpreter,
     this.onOpenSkills,
+    this.voiceModeEnabled = false,
+    this.onToggleVoiceMode,
   });
 
   @override
@@ -555,6 +563,20 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
             ),
           _actionChips(),
           const SizedBox(height: 8),
+          if (_recording) ...[
+            Padding(
+              padding: const EdgeInsets.only(left: 4, bottom: 8),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const _RecordingWaveform(),
+                  const SizedBox(width: 8),
+                  const Text('Mendengarkan...',
+                      style: TextStyle(fontSize: 12, color: JeonColors.accent, fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+          ],
           Container(
             padding: const EdgeInsets.fromLTRB(4, 4, 6, 4),
             decoration: BoxDecoration(
@@ -569,6 +591,32 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
                   icon: const Icon(Icons.add, size: 20, color: JeonColors.inkMuted),
                   tooltip: 'Tambah',
                   onPressed: _showPlusMenu,
+                ),
+                IconButton(
+                  icon: _sttLoading
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: JeonColors.accent),
+                        )
+                      : Icon(
+                          _recording ? Icons.mic : Icons.mic_none_rounded,
+                          size: 19,
+                          color: _recording ? JeonColors.accent : JeonColors.inkFaint,
+                        ),
+                  tooltip: _recording ? 'Berhenti rekam' : 'Dikte suara (rekam)',
+                  onPressed: _sttLoading ? null : _toggleMic,
+                ),
+                IconButton(
+                  icon: Icon(
+                    widget.voiceModeEnabled ? Icons.volume_up_rounded : Icons.volume_off_rounded,
+                    size: 19,
+                    color: widget.voiceModeEnabled ? JeonColors.accent : JeonColors.inkFaint,
+                  ),
+                  tooltip: widget.voiceModeEnabled
+                      ? 'Voice mode aktif — balasan AI dibacakan otomatis'
+                      : 'Aktifkan voice mode (balasan AI dibacakan otomatis)',
+                  onPressed: widget.onToggleVoiceMode,
                 ),
                 Expanded(
                   child: Focus(
@@ -626,22 +674,7 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
                       onPressed: () => _submit(),
                     ),
                   )
-                else ...[
-                  IconButton(
-                    icon: _sttLoading
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: JeonColors.accent),
-                          )
-                        : Icon(
-                            _recording ? Icons.mic : Icons.mic_none_rounded,
-                            size: 19,
-                            color: _recording ? JeonColors.accent : JeonColors.inkFaint,
-                          ),
-                    tooltip: _recording ? 'Berhenti rekam' : 'Dikte suara (rekam)',
-                    onPressed: _sttLoading ? null : _toggleMic,
-                  ),
+                else
                   Container(
                     margin: const EdgeInsets.only(left: 2),
                     decoration: const BoxDecoration(color: JeonColors.accent, shape: BoxShape.circle),
@@ -651,7 +684,6 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
                       onPressed: _startVoiceMode,
                     ),
                   ),
-                ],
               ],
             ),
           ),
@@ -766,6 +798,61 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Waveform sederhana (4 bar animasi, tanpa dependency tambahan) — dipakai
+/// sebagai indikator visual di samping teks "Mendengarkan..." saat rekaman
+/// mic sedang berjalan.
+class _RecordingWaveform extends StatefulWidget {
+  const _RecordingWaveform();
+
+  @override
+  State<_RecordingWaveform> createState() => _RecordingWaveformState();
+}
+
+class _RecordingWaveformState extends State<_RecordingWaveform> with TickerProviderStateMixin {
+  static const _barCount = 4;
+  late final List<AnimationController> _controllers;
+
+  @override
+  void initState() {
+    super.initState();
+    _controllers = List.generate(
+      _barCount,
+      (_) => AnimationController(vsync: this, duration: const Duration(milliseconds: 450)),
+    );
+    for (var i = 0; i < _controllers.length; i++) {
+      Future.delayed(Duration(milliseconds: 90 * i), () {
+        if (mounted) _controllers[i].repeat(reverse: true);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final c in _controllers) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: List.generate(_barCount, (i) {
+        return AnimatedBuilder(
+          animation: _controllers[i],
+          builder: (context, child) => Container(
+            margin: const EdgeInsets.symmetric(horizontal: 1.5),
+            width: 3,
+            height: 6 + _controllers[i].value * 10,
+            decoration: BoxDecoration(color: JeonColors.accent, borderRadius: BorderRadius.circular(2)),
+          ),
+        );
+      }),
     );
   }
 }

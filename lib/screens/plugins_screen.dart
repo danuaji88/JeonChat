@@ -6,29 +6,32 @@ import 'package:shared_preferences/shared_preferences.dart';
 enum _Tab { plugins, skills }
 
 /// Satu entri plugin/skill — dipakai untuk Featured/Productivity/Creativity
-/// (tab Plugins) maupun daftar skill JEON (tab Skills).
+/// (tab Plugins) maupun daftar skill JEON (tab Skills). [id] slug snake_case
+/// dikirim ke backend /agent 'plugins' (lihat PluginService); skill built-in
+/// (tab Skills) tidak dikirim ke situ jadi tidak butuh id.
 class PluginItem {
   final String emoji;
   final String title;
   final String description;
+  final String id;
 
-  const PluginItem({required this.emoji, required this.title, required this.description});
+  const PluginItem({required this.emoji, required this.title, required this.description, this.id = ''});
 }
 
 /// Isi Plugin Store ala ChatGPT — dipakai SEBAGAI KONTEN AREA CHAT (bukan
 /// route/Scaffold sendiri) supaya sidebar tetap terlihat. Status install
-/// plugin (tab Plugins) dikendalikan parent lewat [installedTitles] +
+/// plugin (tab Plugins) dikendalikan parent lewat [installedIds] +
 /// [onTogglePlugin] — persisted lewat PluginService — supaya sinkron dengan
 /// section "My Plugins" di sidebar dan badge di input bar. Tab Skills tetap
 /// state internal (belum diminta ikut dipersist/diselaraskan ke luar).
 class PluginsStoreView extends StatefulWidget {
-  final Set<String> installedTitles;
+  final Set<String> installedIds;
   final ValueChanged<PluginItem> onTogglePlugin;
   final VoidCallback onBack;
 
   const PluginsStoreView({
     super.key,
-    required this.installedTitles,
+    required this.installedIds,
     required this.onTogglePlugin,
     required this.onBack,
   });
@@ -48,32 +51,32 @@ class _PluginsStoreViewState extends State<PluginsStoreView> {
   static const _customSkillsKey = 'jeon_custom_skills';
 
   static const _featured = <PluginItem>[
-    PluginItem(emoji: '🎬', title: 'Video Editor', description: 'Cut, merge, filter, caption, subtitle'),
-    PluginItem(emoji: '✂️', title: 'AI Clipper', description: 'Potong video jadi klip viral otomatis'),
-    PluginItem(emoji: '🖼️', title: 'Image Generator', description: 'Gambar gratis & berbayar (Flux, Gemini, Novita)'),
-    PluginItem(emoji: '🎥', title: 'Video Generator', description: 'Veo 3.1, Hailuo, Kie Veo3'),
-    PluginItem(emoji: '🔊', title: 'TTS Voice-over', description: 'Edge gratis, ElevenLabs natural'),
-    PluginItem(emoji: '🎵', title: 'Sound Effects', description: '15.992 file SFX'),
-    PluginItem(emoji: '📸', title: 'Filter Foto', description: 'Natural skin bright, blue sky, LUT 3D'),
-    PluginItem(emoji: '📊', title: 'Laporan', description: 'HTML, Word, Excel, PPT, PDF'),
-    PluginItem(emoji: '🎥', title: 'Analisis Video', description: 'Teknis, visual, isi, kualitas 0-100'),
-    PluginItem(emoji: '#️⃣', title: 'Hashtag Generator', description: 'Viral hashtags per platform'),
-    PluginItem(emoji: '🖼️', title: 'Thumbnail', description: 'YouTube thumbnail intelligence'),
-    PluginItem(emoji: '🎬', title: 'B-Roll', description: 'Footage pendukung otomatis'),
+    PluginItem(id: 'video_editor', emoji: '🎬', title: 'Video Editor', description: 'Cut, merge, filter, caption, subtitle'),
+    PluginItem(id: 'ai_clipper', emoji: '✂️', title: 'AI Clipper', description: 'Potong video jadi klip viral otomatis'),
+    PluginItem(id: 'image_generator', emoji: '🖼️', title: 'Image Generator', description: 'Gambar gratis & berbayar (Flux, Gemini, Novita)'),
+    PluginItem(id: 'video_generator', emoji: '🎥', title: 'Video Generator', description: 'Veo 3.1, Hailuo, Kie Veo3'),
+    PluginItem(id: 'tts', emoji: '🔊', title: 'TTS Voice-over', description: 'Edge gratis, ElevenLabs natural'),
+    PluginItem(id: 'sound_effects', emoji: '🎵', title: 'Sound Effects', description: '15.992 file SFX'),
+    PluginItem(id: 'photo_filter', emoji: '📸', title: 'Filter Foto', description: 'Natural skin bright, blue sky, LUT 3D'),
+    PluginItem(id: 'report', emoji: '📊', title: 'Laporan', description: 'HTML, Word, Excel, PPT, PDF'),
+    PluginItem(id: 'video_analysis', emoji: '🎥', title: 'Analisis Video', description: 'Teknis, visual, isi, kualitas 0-100'),
+    PluginItem(id: 'hashtag_generator', emoji: '#️⃣', title: 'Hashtag Generator', description: 'Viral hashtags per platform'),
+    PluginItem(id: 'thumbnail', emoji: '🖼️', title: 'Thumbnail', description: 'YouTube thumbnail intelligence'),
+    PluginItem(id: 'broll', emoji: '🎬', title: 'B-Roll', description: 'Footage pendukung otomatis'),
   ];
 
   static const _productivity = <PluginItem>[
-    PluginItem(emoji: '📧', title: 'Google Workspace', description: 'Gmail, Calendar, Drive'),
-    PluginItem(emoji: '🐙', title: 'GitHub', description: 'Kelola repo & issue langsung dari chat'),
-    PluginItem(emoji: '📓', title: 'Notion', description: 'Sinkron catatan & database Notion'),
-    PluginItem(emoji: '💬', title: 'Slack', description: 'Kirim & baca pesan tim di Slack'),
+    PluginItem(id: 'google_workspace', emoji: '📧', title: 'Google Workspace', description: 'Gmail, Calendar, Drive'),
+    PluginItem(id: 'github', emoji: '🐙', title: 'GitHub', description: 'Kelola repo & issue langsung dari chat'),
+    PluginItem(id: 'notion', emoji: '📓', title: 'Notion', description: 'Sinkron catatan & database Notion'),
+    PluginItem(id: 'slack', emoji: '💬', title: 'Slack', description: 'Kirim & baca pesan tim di Slack'),
   ];
 
   static const _creativity = <PluginItem>[
-    PluginItem(emoji: '🎨', title: 'Canva', description: 'Desain grafis siap pakai'),
-    PluginItem(emoji: '✂️', title: 'CapCut', description: 'Edit video gaya CapCut'),
-    PluginItem(emoji: '🎼', title: 'Suno AI Music', description: 'Bikin musik dari prompt teks'),
-    PluginItem(emoji: '🎧', title: 'Stable Audio', description: 'Generate audio & musik AI'),
+    PluginItem(id: 'canva', emoji: '🎨', title: 'Canva', description: 'Desain grafis siap pakai'),
+    PluginItem(id: 'capcut', emoji: '✂️', title: 'CapCut', description: 'Edit video gaya CapCut'),
+    PluginItem(id: 'suno', emoji: '🎼', title: 'Suno AI Music', description: 'Bikin musik dari prompt teks'),
+    PluginItem(id: 'stable_audio', emoji: '🎧', title: 'Stable Audio', description: 'Generate audio & musik AI'),
   ];
 
   static const _skills = <PluginItem>[
@@ -318,12 +321,12 @@ class _PluginsStoreViewState extends State<PluginsStoreView> {
   // ---- Tab Plugins ----
   // Plugin yang sudah di-install "pindah" ke section Installed di paling
   // atas (dan hilang dari section kategori aslinya) — status install datang
-  // dari widget.installedTitles (dikendalikan parent, persisted).
+  // dari widget.installedIds (dikendalikan parent, persisted).
 
   Widget _pluginsBody(bool isWide) {
     final q = _query.trim().toLowerCase();
     bool matches(PluginItem p) => q.isEmpty || p.title.toLowerCase().contains(q);
-    bool isInstalled(PluginItem p) => widget.installedTitles.contains(p.title);
+    bool isInstalled(PluginItem p) => widget.installedIds.contains(p.id);
 
     final allPlugins = [..._featured, ..._productivity, ..._creativity];
     final installed = allPlugins.where((p) => isInstalled(p) && matches(p)).toList();

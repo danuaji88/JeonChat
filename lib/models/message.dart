@@ -59,6 +59,11 @@ class ChatMessage {
   /// badge "Dari dokumen: X" di atas bubble kalau tidak null.
   final String? docSource;
 
+  /// ID plugin (snake_case, mis. "video_editor") yang dipakai backend buat
+  /// menyusun balasan ini — dari field "plugins_used" respons /agent,
+  /// dirender sebagai badge kecil "via X, Y" di chat_bubble.dart.
+  final List<String> pluginsUsed;
+
   const ChatMessage({
     required this.isUser,
     required this.text,
@@ -73,6 +78,7 @@ class ChatMessage {
     this.searchResults,
     this.codeResult,
     this.docSource,
+    this.pluginsUsed = const [],
   });
 
   /// Shape expected by the JEON backend: {role, content}.
@@ -96,6 +102,7 @@ class ChatMessage {
         if (searchResults != null) 'searchResults': searchResults,
         if (codeResult != null) 'codeResult': codeResult,
         if (docSource != null) 'docSource': docSource,
+        if (pluginsUsed.isNotEmpty) 'pluginsUsed': pluginsUsed,
       };
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) => ChatMessage(
@@ -117,5 +124,6 @@ class ChatMessage {
             .toList(),
         codeResult: (json['codeResult'] as Map?)?.map((k, v) => MapEntry(k.toString(), v.toString())),
         docSource: json['docSource'] as String?,
+        pluginsUsed: (json['pluginsUsed'] as List?)?.map((e) => e.toString()).toList() ?? const [],
       );
 }

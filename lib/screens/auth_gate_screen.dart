@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../services/api_service.dart';
 import '../theme.dart';
+import '../widgets/social_login_buttons.dart';
 import 'register_screen.dart';
 
 enum _AuthMode { token, credentials }
@@ -157,6 +158,22 @@ class _AuthGateScreenState extends State<AuthGateScreen> {
                       ),
                       child: const Text('Daftar', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
                     ),
+                  ),
+                  const SizedBox(height: 22),
+                  Row(
+                    children: [
+                      const Expanded(child: Divider(color: JeonColors.border)),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        child: Text('atau', style: TextStyle(fontSize: 11.5, color: JeonColors.inkFaint)),
+                      ),
+                      const Expanded(child: Divider(color: JeonColors.border)),
+                    ],
+                  ),
+                  const SizedBox(height: 18),
+                  SocialLoginButtons(
+                    api: widget.api,
+                    onSuccess: () => Navigator.of(context).pop(true),
                   ),
                   const SizedBox(height: 10),
                   SizedBox(

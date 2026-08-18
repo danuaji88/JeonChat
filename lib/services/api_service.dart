@@ -158,6 +158,20 @@ class ApiService {
     return token;
   }
 
+  /// Login sosial via /auth/social — [provider] = 'google'|'tiktok'|'facebook',
+  /// [token] = ID/access token dari SDK provider terkait.
+  Future<Map<String, dynamic>> socialLogin({required String provider, required String token}) async {
+    final res = await _post('/auth/social', {'provider': provider, 'token': token});
+    final sessionTok = (res['token'] ?? '').toString();
+    if (sessionTok.isEmpty) {
+      throw ApiException('Login gagal: token tidak ditemukan pada respons server.');
+    }
+    sessionToken = sessionTok;
+    isGuest = false;
+    await saveToPrefs();
+    return res;
+  }
+
   Future<void> logout() async {
     sessionToken = null;
     isGuest = false;
@@ -311,6 +325,10 @@ class ApiService {
     return (res['text'] ?? '').toString();
   }
 
+  /// Kredit/kuota user via /quota — {plan, credits: {total, used, remaining,
+  /// cost_per_feature: {...}}}.
+  Future<Map<String, dynamic>> getQuota() => _get('/quota');
+
   /// Code Interpreter via /code.
   Future<Map<String, dynamic>> runCode(String code) =>
       _post('/code', {'code': code}, timeout: const Duration(seconds: 60));
@@ -372,6 +390,7 @@ class ApiService {
     required String prompt,
     required String model,
     String? agentSession,
+    List<String> plugins = const [],
   }) async {
     if (!isConfigured) {
       throw ApiException('Base URL belum diatur. Buka Settings untuk isi URL backend.');
@@ -384,6 +403,7 @@ class ApiService {
         'prompt': prompt,
         'model': model,
         if (agentSession != null) 'session_id': agentSession,
+        if (plugins.isNotEmpty) 'plugins': plugins,
       };
       final res = await http
           .post(_uri('/agent'), headers: _headers, body: jsonEncode(body))
@@ -391,31 +411,35 @@ class ApiService {
 
       if (res.statusCode == 504) {
         // Timeout sync → fallback ke async
-        return await _agentSubmitPoll(prompt, model, agentSession);
+        return await _agentSubmitPoll(prompt, model, agentSession, plugins);
       }
       if (res.statusCode != 200) {
         throw ApiException('Agent gagal (${res.statusCode}): ${res.body}');
       }
       final data = jsonDecode(res.body) as Map<String, dynamic>;
       final fileUrls = (data['file_urls'] as List?)?.cast<String>() ?? [];
+      final pluginsUsed = (data['plugins_used'] as List?)?.cast<String>() ?? [];
       return AgentResult(
         content: (data['content'] ?? '').toString(),
         agentSession: data['agent_session']?.toString(),
         fileUrls: fileUrls,
         model: data['model']?.toString(),
+        pluginsUsed: pluginsUsed,
       );
     } on AgentTimeoutException {
       // Sync timeout → fallback ke async submit+poll
-      return await _agentSubmitPoll(prompt, model, agentSession);
+      return await _agentSubmitPoll(prompt, model, agentSession, plugins);
     }
   }
 
-  Future<AgentResult> _agentSubmitPoll(String prompt, String model, String? agentSession) async {
+  Future<AgentResult> _agentSubmitPoll(
+      String prompt, String model, String? agentSession, List<String> plugins) async {
     // Submit task
     final submitBody = {
       'prompt': prompt,
       'model': model,
       if (agentSession != null) 'session_id': agentSession,
+      if (plugins.isNotEmpty) 'plugins': plugins,
     };
     final submitRes = await http
         .post(_uri('/agent/submit'), headers: _headers, body: jsonEncode(submitBody))
@@ -441,11 +465,13 @@ class ApiService {
       final status = pollData['status']?.toString();
       if (status == 'done') {
         final fileUrls = (pollData['file_urls'] as List?)?.cast<String>() ?? [];
+        final pluginsUsed = (pollData['plugins_used'] as List?)?.cast<String>() ?? [];
         return AgentResult(
           content: (pollData['content'] ?? '').toString(),
           agentSession: pollData['agent_session']?.toString(),
           fileUrls: fileUrls,
           model: pollData['model']?.toString(),
+          pluginsUsed: pluginsUsed,
         );
       }
       if (status == 'error') {
@@ -539,7 +565,14 @@ class AgentResult {
   final String? agentSession;
   final List<String> fileUrls;
   final String? model;
-  AgentResult({required this.content, this.agentSession, this.fileUrls = const [], this.model});
+  final List<String> pluginsUsed;
+  AgentResult({
+    required this.content,
+    this.agentSession,
+    this.fileUrls = const [],
+    this.model,
+    this.pluginsUsed = const [],
+  });
 }
 
 class AgentTimeoutException implements Exception {

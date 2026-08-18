@@ -33,6 +33,10 @@ class JeonChatSidebar extends StatefulWidget {
   final ValueChanged<String>? onSelectPlugin;
   final ValueChanged<String>? onDeactivatePlugin;
 
+  /// GET /quota mentah — {plan, credits: {total, used, remaining,
+  /// cost_per_feature}}. Null = belum dimuat/user belum login (badge disembunyikan).
+  final Map<String, dynamic>? quota;
+
   // ---- Projects ----
   final List<Map<String, dynamic>> projects;
   final String? activeProjectId;
@@ -76,6 +80,7 @@ class JeonChatSidebar extends StatefulWidget {
     this.installedPlugins = const [],
     this.onSelectPlugin,
     this.onDeactivatePlugin,
+    this.quota,
   });
 
   @override
@@ -182,6 +187,7 @@ class _JeonChatSidebarState extends State<JeonChatSidebar> {
             ),
           ),
           const Divider(color: Color(0xFF262626), height: 1),
+          _creditBadge(),
           _footer(),
         ],
       ),
@@ -384,7 +390,7 @@ class _JeonChatSidebarState extends State<JeonChatSidebar> {
             }),
             _menuTile(Icons.power_settings_new, 'Nonaktifkan', color: _deleteRed, onTap: () {
               Navigator.of(sheetContext).pop();
-              widget.onDeactivatePlugin?.call(plugin.title);
+              widget.onDeactivatePlugin?.call(plugin.id);
             }),
             const SizedBox(height: 8),
           ],
@@ -1224,6 +1230,129 @@ class _JeonChatSidebarState extends State<JeonChatSidebar> {
     );
     if (confirmed == true) widget.onDeleteConversation(conv['id'] as String);
   }
+
+  /// Dashboard kredit — badge "Kredit: X/Y" + progress bar tipis dekat
+  /// footer profil, tap buka rincian (plan, biaya per fitur, Upgrade).
+  /// Disembunyikan kalau [quota] belum dimuat (mis. user belum login).
+  Widget _creditBadge() {
+    final quota = widget.quota;
+    if (quota == null) return const SizedBox.shrink();
+    final credits = quota['credits'] as Map<String, dynamic>? ?? {};
+    final total = (credits['total'] as num?)?.toInt() ?? 0;
+    final remaining = (credits['remaining'] as num?)?.toInt() ?? 0;
+    final ratio = total > 0 ? (remaining / total).clamp(0.0, 1.0) : 0.0;
+    final depleted = remaining <= 0;
+    const okGreen = Color(0xFF3FB950);
+
+    return InkWell(
+      onTap: () => _showQuotaDetail(quota),
+      hoverColor: _hoverBg,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.bolt, size: 13, color: depleted ? _deleteRed : okGreen),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    depleted ? 'Kredit habis — upgrade untuk lanjut' : 'Kredit: $remaining/$total',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: 11.5, color: depleted ? _deleteRed : _ink, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 5),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(3),
+              child: LinearProgressIndicator(
+                value: ratio,
+                minHeight: 4,
+                backgroundColor: _borderColor,
+                valueColor: AlwaysStoppedAnimation(depleted ? _deleteRed : okGreen),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showQuotaDetail(Map<String, dynamic> quota) {
+    final plan = (quota['plan'] ?? 'free').toString();
+    final planLabel = plan.isEmpty ? plan : '${plan[0].toUpperCase()}${plan.substring(1)}';
+    final credits = quota['credits'] as Map<String, dynamic>? ?? {};
+    final total = (credits['total'] as num?)?.toInt() ?? 0;
+    final remaining = (credits['remaining'] as num?)?.toInt() ?? 0;
+    final used = (credits['used'] as num?)?.toInt() ?? (total - remaining);
+    final costs = credits['cost_per_feature'] as Map<String, dynamic>? ?? {};
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF171717),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 22, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Plan: $planLabel',
+                  style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w700, color: _ink)),
+              const SizedBox(height: 6),
+              Text('Kredit tersisa: $remaining dari $total (terpakai $used)',
+                  style: const TextStyle(fontSize: 13, color: _inkMuted)),
+              if (costs.isNotEmpty) ...[
+                const SizedBox(height: 18),
+                const Text('Biaya per fitur',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _inkFaint)),
+                const SizedBox(height: 8),
+                ...costs.entries.map((e) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(_prettifyFeature(e.key), style: const TextStyle(fontSize: 13, color: _ink)),
+                          ),
+                          Text('${e.value} kredit', style: const TextStyle(fontSize: 12, color: _inkMuted)),
+                        ],
+                      ),
+                    )),
+              ],
+              const SizedBox(height: 18),
+              SizedBox(
+                height: 44,
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () {
+                    Navigator.of(sheetContext).pop();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Halaman upgrade segera hadir')),
+                    );
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _ink,
+                    foregroundColor: Colors.black,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+                  ),
+                  child: const Text('Upgrade', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _prettifyFeature(String key) => key.isEmpty ? key : '${key[0].toUpperCase()}${key.substring(1)}';
 
   Widget _footer() {
     return InkWell(

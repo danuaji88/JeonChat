@@ -143,6 +143,7 @@ class ChatBubble extends StatelessWidget {
             if (message.searchResults != null && message.searchResults!.isNotEmpty)
               _searchResultsList(message.searchResults!),
             if (message.codeResult != null) _codeResultCard(message.codeResult!),
+            if (message.pluginsUsed.isNotEmpty) _pluginsUsedBadge(message.pluginsUsed),
             if (message.costChip != null || message.timeChip != null)
               Container(
                 margin: const EdgeInsets.only(top: 9),
@@ -436,6 +437,26 @@ class ChatBubble extends StatelessWidget {
       ),
     );
   }
+
+  Widget _pluginsUsedBadge(List<String> ids) => Padding(
+        padding: const EdgeInsets.only(top: 7),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.extension_outlined, size: 11, color: JeonColors.inkFaint),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text('via ${ids.map(_prettifyPluginId).join(', ')}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 10.5, color: JeonColors.inkFaint, fontStyle: FontStyle.italic)),
+            ),
+          ],
+        ),
+      );
+
+  String _prettifyPluginId(String id) =>
+      id.split('_').where((w) => w.isNotEmpty).map((w) => w[0].toUpperCase() + w.substring(1)).join(' ');
 
   Future<void> _openUrl(String url) async {
     try {

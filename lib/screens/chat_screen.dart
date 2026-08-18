@@ -55,26 +55,33 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
   // pertanyaan ke askDoc() dan buat badge "Dari dokumen: X" di chat_bubble.
   String? _activeDocName;
 
+  // ---- Voice mode persisten: saat aktif, SETIAP balasan AI (bukan cuma
+  // dari mode dengar sekali _onVoiceModeResult) otomatis dibacakan via /tts. ----
+  bool _voiceModeEnabled = false;
+
+  // ---- Dashboard kredit: GET /quota mentah, null = belum dimuat/guest. ----
+  Map<String, dynamic>? _quota;
+
   // Deteksi file yang disebut agent (mis. "disimpan di /tmp/xxx.jpg") agar
   // bisa ditampilkan sebagai preview gambar/audio, bukan cuma teks path.
   static final _tmpFilePathRegex = RegExp(r'/tmp/[\w\-.]+\.\w+');
   static const _imageExtensions = {'.jpg', '.jpeg', '.png', '.gif', '.webp'};
   static const _audioExtensions = {'.mp3', '.wav', '.ogg', '.m4a', '.aac'};
 
-  ChatMessage _buildAgentMessage(String content) {
+  ChatMessage _buildAgentMessage(String content, {List<String> pluginsUsed = const []}) {
     final match = _tmpFilePathRegex.firstMatch(content);
-    if (match == null) return ChatMessage(isUser: false, text: content);
+    if (match == null) return ChatMessage(isUser: false, text: content, pluginsUsed: pluginsUsed);
     final path = match.group(0)!;
     final dot = path.lastIndexOf('.');
     final ext = dot == -1 ? '' : path.substring(dot).toLowerCase();
     final mediaUrl = '${widget.api.baseUrl}$path';
     if (_imageExtensions.contains(ext)) {
-      return ChatMessage(isUser: false, text: content, imageUrl: mediaUrl);
+      return ChatMessage(isUser: false, text: content, imageUrl: mediaUrl, pluginsUsed: pluginsUsed);
     }
     if (_audioExtensions.contains(ext)) {
-      return ChatMessage(isUser: false, text: content, audioUrl: mediaUrl);
+      return ChatMessage(isUser: false, text: content, audioUrl: mediaUrl, pluginsUsed: pluginsUsed);
     }
-    return ChatMessage(isUser: false, text: content, filePath: path);
+    return ChatMessage(isUser: false, text: content, filePath: path, pluginsUsed: pluginsUsed);
   }
 
   // ---- Demo data (mirrors /opt/data/jeonchat_ui_mockup.html) ----
@@ -108,6 +115,41 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     _loadConversations();
     _loadInstalledPlugins();
     _loadModelOptions();
+    if (widget.api.isLoggedIn) _loadQuota();
+  }
+
+  /// GET /quota — dipanggil sekali saat login, lalu disegarkan tiap kali
+  /// fitur berkredit (chat/gambar/video/tts/agent) selesai dipakai supaya
+  /// badge di sidebar selalu menunjukkan sisa kredit terbaru dari server
+  /// (bukan dihitung mundur lokal, biar tidak meleset dari nilai asli).
+  Future<void> _loadQuota() async {
+    try {
+      final data = await widget.api.getQuota();
+      if (!mounted) return;
+      setState(() => _quota = data);
+    } catch (_) {
+      // Guest/token belum valid/endpoint gagal — badge kredit tetap disembunyikan.
+    }
+  }
+
+  void _toggleVoiceMode() => setState(() => _voiceModeEnabled = !_voiceModeEnabled);
+
+  /// Voice mode aktif → bacakan setiap balasan AI otomatis lewat /tts.
+  /// Dipanggil dari [_resolveTyping] supaya berlaku untuk SEMUA jalur
+  /// balasan (chat biasa, media, web search, dst), bukan cuma yang dikirim
+  /// lewat mode dengar sekali [_onVoiceModeResult].
+  Future<void> _maybeSpeak(ChatMessage message) async {
+    if (!_voiceModeEnabled || message.isUser) return;
+    final text = message.text.trim();
+    if (text.isEmpty || text.startsWith('⚠️') || text == _thinkingText) return;
+    try {
+      final audioUrl = await widget.api.generateTTS(text);
+      if (audioUrl.isEmpty) return;
+      final player = AudioPlayer();
+      await player.play(UrlSource(audioUrl));
+    } catch (_) {
+      // Balasan tetap tampil di chat walau pembacaan suara gagal.
+    }
   }
 
   /// GET /models sudah menyertakan 'options' — kalau gagal/tidak ada,
@@ -307,16 +349,16 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
   }
 
   Future<void> _togglePlugin(PluginItem item) async {
-    final installed = _installedPlugins.any((p) => p.title == item.title);
+    final installed = _installedPlugins.any((p) => p.id == item.id);
     final updated = installed
-        ? await PluginService.uninstall(item.title)
-        : await PluginService.install(item.title, item.emoji);
+        ? await PluginService.uninstall(item.id)
+        : await PluginService.install(item.id, item.title, item.emoji);
     if (!mounted) return;
     setState(() => _installedPlugins = updated);
   }
 
-  Future<void> _deactivatePlugin(String title) async {
-    final updated = await PluginService.uninstall(title);
+  Future<void> _deactivatePlugin(String id) async {
+    final updated = await PluginService.uninstall(id);
     if (!mounted) return;
     setState(() => _installedPlugins = updated);
   }
@@ -420,6 +462,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     if (!mounted) return;
     if (granted == true) {
       setState(() {}); // refresh ikon gembok di sidebar
+      _loadQuota();
       onGranted();
     }
   }
@@ -447,6 +490,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
         ];
       }
     });
+    _maybeSpeak(reply);
   }
 
   /// Riwayat buat dikirim ke /chat — buang semua bubble placeholder "Sedang
@@ -536,6 +580,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
           imageUrl: imageUrl,
         ));
         _saveHistory();
+        _loadQuota();
       } else if (isVid) {
         final videoUrl = await widget.api.generateMediaVideo(prompt);
         _resolveTyping(typing, ChatMessage(
@@ -544,6 +589,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
           videoUrl: videoUrl,
         ));
         _saveHistory();
+        _loadQuota();
       } else if (isAudio) {
         final audioUrl = await widget.api.generateTTS(prompt);
         _resolveTyping(typing, ChatMessage(
@@ -552,6 +598,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
           audioUrl: audioUrl,
         ));
         _saveHistory();
+        _loadQuota();
       }
     } catch (e) {
       // Fallback ke agent kalau media endpoint gagal — placeholder "Sedang
@@ -570,18 +617,21 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
         prompt: text,
         model: model,
         agentSession: _agentSession,
+        plugins: _installedPlugins.map((p) => p.id).toList(),
       );
       if (result.agentSession != null) {
         _agentSession = result.agentSession;
       }
-      _resolveTyping(typing, _buildAgentMessage(result.content));
+      _resolveTyping(typing, _buildAgentMessage(result.content, pluginsUsed: result.pluginsUsed));
       _saveHistory();
+      _loadQuota();
     } on AgentTimeoutException {
       // Agent timeout — auto-fallback ke /chat
       try {
         final reply = await widget.api.sendChat(history: _cleanHistory(), model: model);
         _resolveTyping(typing, ChatMessage(isUser: false, text: reply));
         _saveHistory();
+        _loadQuota();
       } catch (e2) {
         _resolveTyping(typing, ChatMessage(isUser: false, text: 'Maaf, koneksi lambat. Coba ulangi ya Appa 🙏'));
         _saveHistory();
@@ -592,6 +642,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
         final reply = await widget.api.sendChat(history: _cleanHistory(), model: model);
         _resolveTyping(typing, ChatMessage(isUser: false, text: reply));
         _saveHistory();
+        _loadQuota();
       } catch (e2) {
         _resolveTyping(typing, ChatMessage(isUser: false, text: '⚠️ ${e2.toString()}'));
         _saveHistory();
@@ -714,6 +765,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     try {
       final url = await widget.api.generateImage(prompt);
       _resolveTyping(typing, ChatMessage(isUser: false, text: '✅ Gambar siap!', imageUrl: url));
+      _loadQuota();
     } catch (e) {
       _resolveTyping(typing, ChatMessage(isUser: false, text: '⚠️ Gagal membuat gambar: $e'));
     }
@@ -731,6 +783,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     try {
       final url = await widget.api.generateTTS(text);
       _resolveTyping(typing, ChatMessage(isUser: false, text: '✅ Audio siap!', audioUrl: url));
+      _loadQuota();
     } catch (e) {
       _resolveTyping(typing, ChatMessage(isUser: false, text: '⚠️ Gagal membuat suara: $e'));
     }
@@ -748,6 +801,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     try {
       final url = await widget.api.generateVideo(prompt);
       _resolveTyping(typing, ChatMessage(isUser: false, text: '✅ Video siap!', videoUrl: url));
+      _loadQuota();
     } catch (e) {
       _resolveTyping(typing, ChatMessage(isUser: false, text: '⚠️ Gagal membuat video: $e'));
     }
@@ -850,6 +904,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
         );
       },
       onDeactivatePlugin: _deactivatePlugin,
+      quota: _quota,
     );
 
     final chatScaffold = Scaffold(
@@ -992,6 +1047,8 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
             }),
             onOpenSkills: _openSkills,
             onSpeechToText: (base64Audio) => widget.api.speechToText(base64Audio),
+            voiceModeEnabled: _voiceModeEnabled,
+            onToggleVoiceMode: _toggleVoiceMode,
           ),
         ],
       ),
@@ -1001,7 +1058,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       backgroundColor: Colors.black,
       body: SafeArea(
         child: PluginsStoreView(
-          installedTitles: _installedPlugins.map((p) => p.title).toSet(),
+          installedIds: _installedPlugins.map((p) => p.id).toSet(),
           onTogglePlugin: _togglePlugin,
           onBack: _closePluginsStore,
         ),
