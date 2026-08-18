@@ -22,6 +22,7 @@ class JeonChatSidebar extends StatefulWidget {
   final VoidCallback onClose;
   final VoidCallback? onClearHistory;
   final VoidCallback? onProfileChanged;
+  final VoidCallback? onOpenLibrary;
 
   // ---- Projects ----
   final List<Map<String, dynamic>> projects;
@@ -59,6 +60,7 @@ class JeonChatSidebar extends StatefulWidget {
     required this.onDeleteProject,
     this.onClearHistory,
     this.onProfileChanged,
+    this.onOpenLibrary,
   });
 
   @override
@@ -131,7 +133,7 @@ class _JeonChatSidebarState extends State<JeonChatSidebar> {
           const SizedBox(height: 6),
           _modeToggle(),
           const SizedBox(height: 6),
-          _navItem(Icons.auto_stories_outlined, 'Library'),
+          _navItem(Icons.auto_stories_outlined, 'Library', onTap: widget.onOpenLibrary),
           _navItem(Icons.schedule_outlined, 'Scheduled'),
           _navItem(Icons.extension_outlined, 'Plugins'),
           _navItem(Icons.more_horiz, 'More'),
@@ -281,8 +283,8 @@ class _JeonChatSidebarState extends State<JeonChatSidebar> {
         ),
       );
 
-  Widget _navItem(IconData icon, String label) => InkWell(
-        onTap: () {},
+  Widget _navItem(IconData icon, String label, {VoidCallback? onTap}) => InkWell(
+        onTap: onTap ?? () {},
         hoverColor: _hoverBg,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
