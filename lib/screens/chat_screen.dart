@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:speech_to_text/speech_to_text.dart';
 
 import '../models/agent.dart';
@@ -37,6 +38,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   String? _conversationId;
   List<Map<String, dynamic>> _conversations = [];
   bool? _sidebarOpenOverride; // null = pakai default responsif (terbuka di web/desktop)
+  double _messagesOpacity = 1.0; // fade 150ms saat pindah conversation
 
   // ---- Model selector ("Fast" / "High" / "Think") ----
   static const Map<String, String> _modelOptions = {
@@ -264,6 +266,15 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     setState(() => _conversations = list);
   }
 
+  /// Balikin opacity list pesan ke 1 di frame berikutnya — dipicu tiap kali
+  /// conversation aktif berganti, biar AnimatedOpacity fade-in 150ms.
+  void _fadeInMessages() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      setState(() => _messagesOpacity = 1.0);
+    });
+  }
+
   Future<void> _newChat() async {
     final id = await ChatHistoryService.createConversation();
     final list = await ChatHistoryService.listConversations();
@@ -273,7 +284,9 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       _messages = [];
       _agentSession = null;
       _conversations = list;
+      _messagesOpacity = 0.0;
     });
+    _fadeInMessages();
   }
 
   Future<void> _openChat(String id) async {
@@ -284,7 +297,9 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       _conversationId = id;
       _messages = _messagesFromConversation(conv);
       _agentSession = conv['agentSession'] as String?;
+      _messagesOpacity = 0.0;
     });
+    _fadeInMessages();
     _scrollToBottom();
   }
 
@@ -319,7 +334,9 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
         _conversationId = nextId;
         _messages = _messagesFromConversation(conv);
         _agentSession = conv?['agentSession'] as String?;
+        _messagesOpacity = 0.0;
       });
+      _fadeInMessages();
     } else {
       final newId = await ChatHistoryService.createConversation();
       final refreshed = await ChatHistoryService.listConversations();
@@ -329,7 +346,9 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
         _conversationId = newId;
         _messages = [];
         _agentSession = null;
+        _messagesOpacity = 0.0;
       });
+      _fadeInMessages();
     }
   }
 
@@ -770,8 +789,8 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
           _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 250),
-          curve: Curves.easeOut,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
         );
       }
     });
@@ -935,14 +954,20 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       body: Column(
         children: [
           Expanded(
-            child: _messages.isEmpty
-                ? _welcomeScreen()
-                : ListView.builder(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.fromLTRB(14, 16, 14, 8),
-                    itemCount: _messages.length,
-                    itemBuilder: (context, i) => ChatBubble(message: _messages[i]),
-                  ),
+            child: AnimatedOpacity(
+              opacity: _messagesOpacity,
+              duration: const Duration(milliseconds: 150),
+              curve: Curves.easeOut,
+              child: _messages.isEmpty
+                  ? _welcomeScreen()
+                  : ListView.builder(
+                      controller: _scrollController,
+                      padding: const EdgeInsets.fromLTRB(14, 16, 14, 8),
+                      itemCount: _messages.length,
+                      scrollCacheExtent: const ScrollCacheExtent.pixels(500),
+                      itemBuilder: (context, i) => ChatBubble(message: _messages[i]),
+                    ),
+            ),
           ),
           _composer(),
         ],

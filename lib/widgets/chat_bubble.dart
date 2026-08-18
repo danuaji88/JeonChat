@@ -1,9 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../models/message.dart';
 import '../theme.dart';
 import 'audio_message_player.dart';
 import 'tool_card.dart';
+
+const _thinkingPlaceholder = '⏳ AI sedang bekerja...';
 
 class ChatBubble extends StatelessWidget {
   final ChatMessage message;
@@ -38,6 +42,7 @@ class ChatBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isUser = message.isUser;
+    final isThinking = !isUser && message.text == _thinkingPlaceholder;
     final media = isUser ? null : _extractMediaUrl(message.text);
     // Kalau ada media, jangan tampilkan markdown/URL mentahnya lagi di teks —
     // gambarnya sudah dirender di atas, teks mentah cuma bikin duplikat.
@@ -104,18 +109,27 @@ class ChatBubble extends StatelessWidget {
           children: [
             if (media != null)
               media.isVideo ? _videoUrlPlaceholder(media.url) : _markdownImagePreview(media.url),
-            SelectableText(
-              cleanText,
-              style: TextStyle(
-                fontSize: 13.4,
-                color: isUser ? JeonColors.ink : JeonColors.ink,
-                height: 1.4,
+            if (isThinking)
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: const [
+                  Text('⏳ AI sedang bekerja', style: TextStyle(fontSize: 13.4, color: JeonColors.ink, height: 1.4)),
+                  _ThinkingDots(),
+                ],
+              )
+            else
+              SelectableText(
+                cleanText,
+                style: TextStyle(
+                  fontSize: 13.4,
+                  color: isUser ? JeonColors.ink : JeonColors.ink,
+                  height: 1.4,
+                ),
+                toolbarOptions: const ToolbarOptions(
+                  copy: true,
+                  selectAll: true,
+                ),
               ),
-              toolbarOptions: const ToolbarOptions(
-                copy: true,
-                selectAll: true,
-              ),
-            ),
             if (message.toolCall != null) ToolCardWidget(toolCall: message.toolCall!),
             if (message.imageUrl != null) _imagePreview(message.imageUrl!),
             if (message.audioUrl != null) AudioMessagePlayer(url: message.audioUrl!),
@@ -144,54 +158,47 @@ class ChatBubble extends StatelessWidget {
       ),
     );
 
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: Row(
-        mainAxisAlignment: isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: isUser
-            ? [bubble, const SizedBox(width: 10), avatar]
-            : [avatar, const SizedBox(width: 10), bubble],
+    return RepaintBoundary(
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 14),
+        child: Row(
+          mainAxisAlignment: isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: isUser
+              ? [bubble, const SizedBox(width: 10), avatar]
+              : [avatar, const SizedBox(width: 10), bubble],
+        ),
       ),
     );
   }
 
-  Widget _markdownImagePreview(String url) => Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(12),
-          child: Image.network(
-            url,
-            fit: BoxFit.cover,
-            width: double.infinity,
-            loadingBuilder: (context, child, progress) {
-              if (progress == null) return child;
-              return Container(
-                height: 180,
+  Widget _markdownImagePreview(String url) => RepaintBoundary(
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: Image.network(
+              url,
+              fit: BoxFit.cover,
+              width: double.infinity,
+              loadingBuilder: (context, child, progress) {
+                if (progress == null) return child;
+                return const _ShimmerBox(height: 180);
+              },
+              errorBuilder: (context, error, stackTrace) => Container(
+                padding: const EdgeInsets.all(10),
                 alignment: Alignment.center,
                 color: JeonColors.surface3,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: JeonColors.accent,
-                  value: progress.expectedTotalBytes != null
-                      ? progress.cumulativeBytesLoaded / progress.expectedTotalBytes!
-                      : null,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.broken_image_outlined, color: JeonColors.inkFaint, size: 24),
+                    const SizedBox(height: 6),
+                    Text(url,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(fontSize: 11, color: JeonColors.inkMuted)),
+                  ],
                 ),
-              );
-            },
-            errorBuilder: (context, error, stackTrace) => Container(
-              padding: const EdgeInsets.all(10),
-              alignment: Alignment.center,
-              color: JeonColors.surface3,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.broken_image_outlined, color: JeonColors.inkFaint, size: 24),
-                  const SizedBox(height: 6),
-                  Text(url,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(fontSize: 11, color: JeonColors.inkMuted)),
-                ],
               ),
             ),
           ),
@@ -203,42 +210,33 @@ class ChatBubble extends StatelessWidget {
         child: Text(url, style: const TextStyle(fontSize: 11, color: JeonColors.inkMuted)),
       );
 
-  Widget _imagePreview(String url) => Padding(
-        padding: const EdgeInsets.only(top: 8),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(JeonRadius.small),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 320),
-            child: Image.network(
-              url,
-              width: double.infinity,
-              fit: BoxFit.cover,
-              loadingBuilder: (context, child, progress) {
-                if (progress == null) return child;
-                return Container(
-                  height: 180,
+  Widget _imagePreview(String url) => RepaintBoundary(
+        child: Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(JeonRadius.small),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 320),
+              child: Image.network(
+                url,
+                width: double.infinity,
+                fit: BoxFit.cover,
+                loadingBuilder: (context, child, progress) {
+                  if (progress == null) return child;
+                  return const _ShimmerBox(height: 180);
+                },
+                errorBuilder: (context, error, stackTrace) => Container(
+                  height: 120,
                   alignment: Alignment.center,
                   color: JeonColors.surface3,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: JeonColors.accent,
-                    value: progress.expectedTotalBytes != null
-                        ? progress.cumulativeBytesLoaded / progress.expectedTotalBytes!
-                        : null,
+                  child: const Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.broken_image_outlined, color: JeonColors.inkFaint, size: 24),
+                      SizedBox(height: 6),
+                      Text('Gambar gagal dimuat', style: TextStyle(fontSize: 11, color: JeonColors.inkFaint)),
+                    ],
                   ),
-                );
-              },
-              errorBuilder: (context, error, stackTrace) => Container(
-                height: 120,
-                alignment: Alignment.center,
-                color: JeonColors.surface3,
-                child: const Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.broken_image_outlined, color: JeonColors.inkFaint, size: 24),
-                    SizedBox(height: 6),
-                    Text('Gambar gagal dimuat', style: TextStyle(fontSize: 11, color: JeonColors.inkFaint)),
-                  ],
                 ),
               ),
             ),
@@ -348,4 +346,86 @@ class ChatBubble extends StatelessWidget {
           ),
         ),
       );
+}
+
+/// Titik "..." yang berputar (".", "..", "...") tiap 500ms di belakang
+/// "AI sedang bekerja" — widget kecil sendiri biar animasinya tidak memicu
+/// rebuild seluruh ChatBubble.
+class _ThinkingDots extends StatefulWidget {
+  const _ThinkingDots();
+
+  @override
+  State<_ThinkingDots> createState() => _ThinkingDotsState();
+}
+
+class _ThinkingDotsState extends State<_ThinkingDots> {
+  static const _frames = ['.', '..', '...'];
+  int _frame = 0;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      if (!mounted) return;
+      setState(() => _frame = (_frame + 1) % _frames.length);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(_frames[_frame], style: const TextStyle(fontSize: 13.4, color: JeonColors.ink, height: 1.4));
+  }
+}
+
+/// Shimmer placeholder sederhana (tanpa dependency tambahan) buat slot
+/// gambar yang masih loading — sapuan gradient abu-abu bergerak.
+class _ShimmerBox extends StatefulWidget {
+  final double height;
+  const _ShimmerBox({this.height = 180});
+
+  @override
+  State<_ShimmerBox> createState() => _ShimmerBoxState();
+}
+
+class _ShimmerBoxState extends State<_ShimmerBox> with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, _) {
+        final t = _controller.value;
+        return ShaderMask(
+          blendMode: BlendMode.srcIn,
+          shaderCallback: (bounds) => LinearGradient(
+            colors: const [JeonColors.surface3, JeonColors.surface2, JeonColors.surface3],
+            stops: const [0.0, 0.5, 1.0],
+            begin: Alignment(-1 + 3 * t, 0),
+            end: Alignment(1 + 3 * t, 0),
+          ).createShader(bounds),
+          child: Container(height: widget.height, color: Colors.white),
+        );
+      },
+    );
+  }
 }
