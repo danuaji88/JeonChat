@@ -187,6 +187,34 @@ class ApiService {
     return data['image_url']?.toString() ?? '';
   }
 
+  /// Media pipeline cepat — gambar via /media/image (gratis dulu: library/Openverse/Wikimedia/Pollinations)
+  Future<String> generateMediaImage(String promptText, {bool allowAi = false}) async {
+    if (!isConfigured) throw ApiException('Base URL belum diatur.');
+    final res = await http
+        .post(_uri('/media/image'), headers: _headers,
+            body: jsonEncode({'prompt': promptText, 'allow_ai': allowAi}))
+        .timeout(const Duration(seconds: 120));
+    if (res.statusCode != 200) {
+      throw ApiException('Gambar gagal (${res.statusCode}): ${res.body}');
+    }
+    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    return data['image_url']?.toString() ?? '';
+  }
+
+  /// Media pipeline cepat — video via /media/video (gratis dulu: library/Openverse/Wikimedia)
+  Future<String> generateMediaVideo(String promptText, {bool allowAi = false}) async {
+    if (!isConfigured) throw ApiException('Base URL belum diatur.');
+    final res = await http
+        .post(_uri('/media/video'), headers: _headers,
+            body: jsonEncode({'prompt': promptText, 'allow_ai': allowAi}))
+        .timeout(const Duration(seconds: 180));
+    if (res.statusCode != 200) {
+      throw ApiException('Video gagal (${res.statusCode}): ${res.body}');
+    }
+    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    return data['video_url']?.toString() ?? '';
+  }
+
   /// Generate TTS via /tts endpoint (gratis: Edge Ardi)
   Future<String> generateTTS(String text) async {
     if (!isConfigured) throw ApiException('Base URL belum diatur.');
