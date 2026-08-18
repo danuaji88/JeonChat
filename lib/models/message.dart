@@ -42,6 +42,15 @@ class ChatMessage {
   final String? videoUrl;
   final String? filePath;
 
+  /// True untuk balasan AI dari analyzeImage() — dipakai chat_bubble.dart
+  /// buat kasih warna bubble hijau, beda dari balasan biasa.
+  final bool isAnalysis;
+
+  /// Hasil webSearch(), tiap item {title, url, snippet} — dirender sebagai
+  /// daftar link clickable di chat_bubble.dart. Null/kosong = bukan pesan
+  /// hasil pencarian.
+  final List<Map<String, String>>? searchResults;
+
   const ChatMessage({
     required this.isUser,
     required this.text,
@@ -52,6 +61,8 @@ class ChatMessage {
     this.audioUrl,
     this.videoUrl,
     this.filePath,
+    this.isAnalysis = false,
+    this.searchResults,
   });
 
   /// Shape expected by the JEON backend: {role, content}.
@@ -71,6 +82,8 @@ class ChatMessage {
         if (audioUrl != null) 'audioUrl': audioUrl,
         if (videoUrl != null) 'videoUrl': videoUrl,
         if (filePath != null) 'filePath': filePath,
+        if (isAnalysis) 'isAnalysis': isAnalysis,
+        if (searchResults != null) 'searchResults': searchResults,
       };
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) => ChatMessage(
@@ -85,5 +98,10 @@ class ChatMessage {
         audioUrl: json['audioUrl'] as String?,
         videoUrl: json['videoUrl'] as String?,
         filePath: json['filePath'] as String?,
+        isAnalysis: json['isAnalysis'] as bool? ?? false,
+        searchResults: (json['searchResults'] as List?)
+            ?.whereType<Map>()
+            .map((e) => e.map((k, v) => MapEntry(k.toString(), v.toString())))
+            .toList(),
       );
 }

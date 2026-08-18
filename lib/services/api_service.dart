@@ -202,6 +202,131 @@ class ApiService {
     return list.map((e) => e.toString()).toList();
   }
 
+  /// Daftar model buat dropdown input bar ({label, value, emoji}) — GET
+  /// /models sudah menyertakan field 'options'. Kalau field itu tidak ada
+  /// atau requestnya gagal, caller pakai [fallbackModelOptions].
+  Future<List<ModelOption>> getModelOptions() async {
+    if (!isConfigured) throw ApiException('Base URL belum diatur di Settings.');
+    final res = await http
+        .get(_uri('/models'), headers: _headers)
+        .timeout(_shortTimeout, onTimeout: () => throw ApiException('Timeout: server tidak merespons.'));
+    if (res.statusCode != 200) {
+      throw ApiException('Gagal memuat model (${res.statusCode})');
+    }
+    final data = jsonDecode(res.body);
+    final rawOptions = (data is Map<String, dynamic>) ? data['options'] : null;
+    if (rawOptions is! List || rawOptions.isEmpty) {
+      throw ApiException('Model options tidak ditemukan pada respons /models');
+    }
+    final options = rawOptions
+        .whereType<Map>()
+        .map((o) => ModelOption(
+              label: (o['label'] ?? o['name'] ?? '').toString(),
+              value: (o['value'] ?? o['id'] ?? o['model'] ?? '').toString(),
+              emoji: (o['emoji'] ?? '').toString(),
+            ))
+        .where((o) => o.value.isNotEmpty)
+        .toList();
+    if (options.isEmpty) {
+      throw ApiException('Model options tidak ditemukan pada respons /models');
+    }
+    return options;
+  }
+
+  /// Dipakai kalau /models tidak menyertakan 'options' atau request gagal.
+  static const List<ModelOption> fallbackModelOptions = [
+    ModelOption(label: 'Fast', value: 'jeon-fast', emoji: '⚡️'),
+    ModelOption(label: 'High', value: 'jeon-chat', emoji: '🎯'),
+    ModelOption(label: 'Think', value: 'ds/deepseek-reasoner', emoji: '🧠'),
+    ModelOption(label: 'Vision', value: 'gemini/gemini-3.6-flash', emoji: '👁'),
+    ModelOption(label: 'Opus', value: 'anthropic/claude-opus-5', emoji: '💎'),
+  ];
+
+  /// Analisis gambar via /analyze — [base64Image] tanpa prefix data URI.
+  Future<String> analyzeImage(String base64Image, {String prompt = 'Jelaskan gambar ini'}) async {
+    if (!isConfigured) throw ApiException('Base URL belum diatur.');
+    final res = await http
+        .post(_uri('/analyze'), headers: _headers,
+            body: jsonEncode({'image_base64': base64Image, 'prompt': prompt}))
+        .timeout(const Duration(seconds: 60));
+    if (res.statusCode != 200) {
+      throw ApiException('Analisis gambar gagal (${res.statusCode}): ${res.body}');
+    }
+    final data = jsonDecode(res.body);
+    if (data is Map<String, dynamic>) {
+      return (data['content'] ?? data['result'] ?? data['answer'] ?? '').toString();
+    }
+    return data.toString();
+  }
+
+  /// Memory user via /memory — action get/add/remove sesuai kebutuhan
+  /// caller (kind+text untuk add, index untuk remove).
+  Future<Map<String, dynamic>> getMemory({
+    String action = 'get',
+    String? kind,
+    String? text,
+    int? index,
+  }) async {
+    if (!isConfigured) throw ApiException('Base URL belum diatur.');
+    final body = {
+      'action': action,
+      if (kind != null) 'kind': kind,
+      if (text != null) 'text': text,
+      if (index != null) 'index': index,
+    };
+    final res = await http
+        .post(_uri('/memory'), headers: _headers, body: jsonEncode(body))
+        .timeout(_shortTimeout);
+    if (res.statusCode != 200) {
+      throw ApiException('Memory gagal (${res.statusCode}): ${res.body}');
+    }
+    final data = jsonDecode(res.body);
+    return data is Map<String, dynamic> ? data : {'data': data};
+  }
+
+  /// Web search via /websearch.
+  Future<List<Map<String, dynamic>>> webSearch(String query) async {
+    if (!isConfigured) throw ApiException('Base URL belum diatur.');
+    final res = await http
+        .post(_uri('/websearch'), headers: _headers,
+            body: jsonEncode({'query': query, 'max_results': 5}))
+        .timeout(const Duration(seconds: 30));
+    if (res.statusCode != 200) {
+      throw ApiException('Web search gagal (${res.statusCode}): ${res.body}');
+    }
+    final data = jsonDecode(res.body);
+    final list = (data is List)
+        ? data
+        : (data is Map<String, dynamic> ? (data['results'] ?? data['data'] ?? []) : []);
+    return (list as List).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+  }
+
+  /// Upload dokumen buat RAG via /upload — return doc_id.
+  Future<String> uploadDoc(String name, String text) async {
+    if (!isConfigured) throw ApiException('Base URL belum diatur.');
+    final res = await http
+        .post(_uri('/upload'), headers: _headers, body: jsonEncode({'name': name, 'text': text}))
+        .timeout(const Duration(seconds: 60));
+    if (res.statusCode != 200) {
+      throw ApiException('Upload dokumen gagal (${res.statusCode}): ${res.body}');
+    }
+    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    return (data['doc_id'] ?? data['id'] ?? '').toString();
+  }
+
+  /// Tanya isi dokumen yang sudah di-upload via /ask.
+  Future<String> askDoc(String query) async {
+    if (!isConfigured) throw ApiException('Base URL belum diatur.');
+    final res = await http
+        .post(_uri('/ask'), headers: _headers, body: jsonEncode({'query': query}))
+        .timeout(const Duration(seconds: 60));
+    if (res.statusCode != 200) {
+      throw ApiException('Tanya dokumen gagal (${res.statusCode}): ${res.body}');
+    }
+    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    return (data['answer'] ?? data['content'] ?? '').toString();
+  }
+
   Future<String> sendChat({
     required List<ChatMessage> history,
     required String model,
@@ -384,6 +509,15 @@ class ApiService {
     final data = jsonDecode(res.body) as Map<String, dynamic>;
     return (data['audio_url'] ?? data['url'] ?? data['audioUrl'])?.toString() ?? '';
   }
+}
+
+/// Satu opsi di dropdown model input bar — dari GET /models 'options' atau
+/// [ApiService.fallbackModelOptions].
+class ModelOption {
+  final String label;
+  final String value;
+  final String emoji;
+  const ModelOption({required this.label, required this.value, this.emoji = ''});
 }
 
 class AgentResult {

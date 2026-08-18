@@ -47,6 +47,10 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
   bool _showPluginsStore = false;
   List<InstalledPlugin> _installedPlugins = [];
 
+  // ---- Fitur AI: model dropdown + dokumen RAG ----
+  List<ModelOption> _modelOptions = ApiService.fallbackModelOptions;
+  bool _hasActiveDocument = false;
+
   // Deteksi file yang disebut agent (mis. "disimpan di /tmp/xxx.jpg") agar
   // bisa ditampilkan sebagai preview gambar/audio, bukan cuma teks path.
   static final _tmpFilePathRegex = RegExp(r'/tmp/[\w\-.]+\.\w+');
@@ -106,6 +110,19 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     super.initState();
     _loadConversations();
     _loadInstalledPlugins();
+    _loadModelOptions();
+  }
+
+  /// GET /models sudah menyertakan 'options' — kalau gagal/tidak ada,
+  /// _modelOptions tetap di fallback (sudah default sejak deklarasi field).
+  Future<void> _loadModelOptions() async {
+    try {
+      final options = await widget.api.getModelOptions();
+      if (!mounted || options.isEmpty) return;
+      setState(() => _modelOptions = options);
+    } catch (_) {
+      // Fallback hardcode tetap dipakai.
+    }
   }
 
   /// Dipanggil JeonChatInputBar setelah mode Voice selesai mendengarkan —
@@ -258,6 +275,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       _conversations = list;
       _messagesOpacity = 0.0;
       _showPluginsStore = false;
+      _hasActiveDocument = false;
     });
     _fadeInMessages();
   }
@@ -275,6 +293,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       _agentSession = conv['agentSession'] as String?;
       _messagesOpacity = 0.0;
       _showPluginsStore = false;
+      _hasActiveDocument = false;
     });
     _fadeInMessages();
     _scrollToBottom();
@@ -460,13 +479,28 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     final isVideoRequest = lower.contains('buat video') || lower.contains('buat konten video') || lower.contains('cari video');
     final isAudioRequest = lower.contains('buat suara') || lower.contains('buat konten suara') || lower.contains('text to speech') || lower.contains('tts') || lower.contains('voice over');
     final isCostRequest = lower.contains('cek biaya') || lower.contains('cek cost') || lower.contains('biaya') || lower.contains('harga');
+    // "cari gambar"/"cari video" sudah ditangani media pipeline di atas —
+    // prefix "cari "/"search " generik baru dianggap web search kalau bukan itu.
+    final isSearchRequest = !isImageRequest &&
+        !isVideoRequest &&
+        !isAudioRequest &&
+        (lower.startsWith('cari ') || lower.startsWith('search '));
 
     if (isImageRequest || isVideoRequest || isAudioRequest) {
       await _handleMediaRequest(trimmed, isImageRequest, isVideoRequest, isAudioRequest, typing);
       return;
     }
+    if (isSearchRequest) {
+      final query = trimmed.replaceFirst(RegExp(r'^(cari|search)\s+', caseSensitive: false), '').trim();
+      await _handleWebSearchRequest(query.isEmpty ? trimmed : query, typing);
+      return;
+    }
     if (isCostRequest) {
       await _handleCostRequest(model, typing);
+      return;
+    }
+    if (_hasActiveDocument) {
+      await _handleDocRequest(trimmed, typing);
       return;
     }
 
@@ -567,6 +601,91 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     } finally {
       _scrollToBottom();
     }
+  }
+
+  Future<void> _handleWebSearchRequest(String query, ChatMessage typing) async {
+    try {
+      final raw = await widget.api.webSearch(query);
+      final results = raw
+          .map((r) => {
+                'title': (r['title'] ?? r['name'] ?? '').toString(),
+                'url': (r['url'] ?? r['link'] ?? '').toString(),
+                'snippet': (r['snippet'] ?? r['description'] ?? r['content'] ?? '').toString(),
+              })
+          .toList();
+      _resolveTyping(
+        typing,
+        ChatMessage(
+          isUser: false,
+          text: results.isEmpty ? 'Tidak ada hasil untuk "$query".' : 'Hasil pencarian untuk "$query":',
+          searchResults: results,
+        ),
+      );
+    } catch (e) {
+      _resolveTyping(typing, ChatMessage(isUser: false, text: '⚠️ Web search gagal: $e'));
+    }
+    _saveHistory();
+  }
+
+  Future<void> _handleDocRequest(String query, ChatMessage typing) async {
+    try {
+      final answer = await widget.api.askDoc(query);
+      _resolveTyping(typing, ChatMessage(isUser: false, text: answer));
+    } catch (e) {
+      _resolveTyping(typing, ChatMessage(isUser: false, text: '⚠️ Gagal menjawab dari dokumen: $e'));
+    }
+    _saveHistory();
+  }
+
+  /// Tombol ikon foto di input bar — gambar sudah dibaca+base64 di sana,
+  /// di sini tinggal tampilkan sebagai bubble user lalu panggil analyzeImage().
+  Future<void> _analyzeImage(String base64Image, String mimeType) async {
+    final dataUri = 'data:$mimeType;base64,$base64Image';
+    final typing = ChatMessage(isUser: false, text: _thinkingText);
+    setState(() {
+      _messages = [
+        ..._messages,
+        ChatMessage(isUser: true, text: 'Analisis gambar ini', imageUrl: dataUri),
+        typing,
+      ];
+    });
+    _saveHistory();
+    _scrollToBottom();
+    try {
+      final result = await widget.api.analyzeImage(base64Image, prompt: 'Jelaskan gambar ini');
+      _resolveTyping(typing, ChatMessage(isUser: false, text: result, isAnalysis: true));
+    } catch (e) {
+      _resolveTyping(typing, ChatMessage(isUser: false, text: '⚠️ Gagal menganalisis gambar: $e'));
+    }
+    _saveHistory();
+    _scrollToBottom();
+  }
+
+  /// "Upload Dokumen" di menu "+" input bar — teks sudah dibaca (UTF-8) di
+  /// sana; di sini upload ke backend (RAG) lalu tandai dokumen aktif supaya
+  /// pertanyaan berikutnya dijawab lewat askDoc() (lihat _send()).
+  Future<void> _uploadDoc(String name, String text) async {
+    final typing = ChatMessage(isUser: false, text: _thinkingText);
+    setState(() {
+      _messages = [..._messages, ChatMessage(isUser: true, text: 'Upload dokumen: $name'), typing];
+    });
+    _saveHistory();
+    _scrollToBottom();
+    try {
+      await widget.api.uploadDoc(name, text);
+      _hasActiveDocument = true;
+      _resolveTyping(
+        typing,
+        ChatMessage(
+          isUser: false,
+          text: "Dokumen '$name' berhasil diupload (${text.length} karakter). Tanyakan apa saja isinya!",
+        ),
+      );
+    } catch (e) {
+      _resolveTyping(typing, ChatMessage(isUser: false, text: '⚠️ Gagal upload dokumen: $e'));
+    }
+    _saveHistory();
+    _scrollToBottom();
   }
 
   // ---- Aksi popover "+" JeonChatInputBar: tiap callback benar-benar panggil backend ----
@@ -841,6 +960,19 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
             onVoiceModeResult: _onVoiceModeResult,
             activePluginCount: _installedPlugins.length,
             onOpenPlugins: () => _requireAuth(_openPluginsStore),
+            modelOptions: _modelOptions,
+            onAnalyzeImage: _analyzeImage,
+            onWebSearch: (query) async {
+              final typing = ChatMessage(isUser: false, text: _thinkingText);
+              setState(() {
+                _messages = [..._messages, ChatMessage(isUser: true, text: 'Cari: $query'), typing];
+              });
+              _saveHistory();
+              _scrollToBottom();
+              await _handleWebSearchRequest(query, typing);
+              _scrollToBottom();
+            },
+            onUploadDoc: _uploadDoc,
           ),
         ],
       ),

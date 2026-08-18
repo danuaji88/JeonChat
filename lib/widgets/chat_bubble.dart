@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher_string.dart';
 
 import '../models/message.dart';
 import '../theme.dart';
@@ -8,6 +9,7 @@ import 'audio_message_player.dart';
 import 'tool_card.dart';
 
 const _thinkingPlaceholder = 'JeonAI Sedang Berpikir Lalu Eksekusi Mohon Ditunggu';
+const _analysisGreen = Color(0xFF2ECC71);
 
 class ChatBubble extends StatelessWidget {
   final ChatMessage message;
@@ -96,9 +98,17 @@ class ChatBubble extends StatelessWidget {
         constraints: const BoxConstraints(maxWidth: 520),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
         decoration: BoxDecoration(
-          color: isUser ? JeonColors.accent.withValues(alpha: 0.15) : JeonColors.surface2,
+          color: isUser
+              ? JeonColors.accent.withValues(alpha: 0.15)
+              : message.isAnalysis
+                  ? _analysisGreen.withValues(alpha: 0.14)
+                  : JeonColors.surface2,
           border: Border.all(
-            color: isUser ? JeonColors.accent.withValues(alpha: 0.3) : JeonColors.borderSoft,
+            color: isUser
+                ? JeonColors.accent.withValues(alpha: 0.3)
+                : message.isAnalysis
+                    ? _analysisGreen.withValues(alpha: 0.4)
+                    : JeonColors.borderSoft,
           ),
           borderRadius: BorderRadius.only(
             topLeft: const Radius.circular(JeonRadius.bubble),
@@ -129,6 +139,8 @@ class ChatBubble extends StatelessWidget {
             if (message.audioUrl != null) AudioMessagePlayer(url: message.audioUrl!),
             if (message.videoUrl != null) _videoCard(message.videoUrl!),
             if (message.filePath != null) _fileCard(message.filePath!),
+            if (message.searchResults != null && message.searchResults!.isNotEmpty)
+              _searchResultsList(message.searchResults!),
             if (message.costChip != null || message.timeChip != null)
               Container(
                 margin: const EdgeInsets.only(top: 9),
@@ -322,6 +334,56 @@ class ChatBubble extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  Widget _searchResultsList(List<Map<String, String>> results) => Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: results.map(_searchResultTile).toList(),
+        ),
+      );
+
+  Widget _searchResultTile(Map<String, String> r) {
+    final title = (r['title'] ?? '').trim().isNotEmpty ? r['title']! : (r['url'] ?? 'Hasil');
+    final url = r['url'] ?? '';
+    final snippet = r['snippet'] ?? '';
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            onTap: url.isEmpty ? null : () => _openUrl(url),
+            child: Text(title,
+                style: const TextStyle(
+                    fontSize: 13,
+                    color: JeonColors.accent,
+                    decoration: TextDecoration.underline,
+                    fontWeight: FontWeight.w600)),
+          ),
+          if (snippet.isNotEmpty) ...[
+            const SizedBox(height: 2),
+            Text(snippet, style: const TextStyle(fontSize: 11.5, color: JeonColors.inkMuted, height: 1.3)),
+          ],
+          if (url.isNotEmpty) ...[
+            const SizedBox(height: 2),
+            Text(url,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 10.5, color: JeonColors.inkFaint)),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openUrl(String url) async {
+    try {
+      await launchUrlString(url, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      // Link rusak/tidak bisa dibuka — biarkan, teks URL tetap terlihat.
+    }
   }
 
   Widget _chip(String text) => Container(

@@ -11,6 +11,7 @@ enum SettingsCategory {
   general,
   notifications,
   personalization,
+  memory,
   plugins,
   voice,
   billing,
@@ -35,6 +36,8 @@ extension SettingsCategoryX on SettingsCategory {
         return Icons.notifications_outlined;
       case SettingsCategory.personalization:
         return Icons.auto_awesome_outlined;
+      case SettingsCategory.memory:
+        return Icons.psychology_outlined;
       case SettingsCategory.plugins:
         return Icons.extension_outlined;
       case SettingsCategory.voice:
@@ -72,6 +75,8 @@ extension SettingsCategoryX on SettingsCategory {
         return 'Notifications';
       case SettingsCategory.personalization:
         return 'Personalization';
+      case SettingsCategory.memory:
+        return 'Memory';
       case SettingsCategory.plugins:
         return 'Plugins';
       case SettingsCategory.voice:
@@ -194,6 +199,11 @@ class _SettingsCategoryScreen extends StatefulWidget {
 class _SettingsCategoryScreenState extends State<_SettingsCategoryScreen> {
   SettingsService? _settings;
 
+  // ---- Memory ----
+  List<Map<String, dynamic>> _memoryItems = [];
+  bool _memoryLoading = false;
+  String? _memoryError;
+
   @override
   void initState() {
     super.initState();
@@ -201,6 +211,220 @@ class _SettingsCategoryScreenState extends State<_SettingsCategoryScreen> {
       if (!mounted) return;
       setState(() => _settings = s);
     });
+    if (widget.category == SettingsCategory.memory) _loadMemory();
+  }
+
+  Future<void> _loadMemory() async {
+    setState(() {
+      _memoryLoading = true;
+      _memoryError = null;
+    });
+    try {
+      final data = await widget.api.getMemory(action: 'get');
+      final items = _extractMemoryItems(data);
+      if (!mounted) return;
+      setState(() {
+        _memoryItems = items;
+        _memoryLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _memoryError = e.toString();
+        _memoryLoading = false;
+      });
+    }
+  }
+
+  List<Map<String, dynamic>> _extractMemoryItems(Map<String, dynamic> data) {
+    final raw = data['items'] ?? data['memories'] ?? data['notes'] ?? data['facts'] ?? data['data'];
+    if (raw is! List) return [];
+    return raw.map((e) {
+      if (e is Map) return Map<String, dynamic>.from(e);
+      return <String, dynamic>{'text': e.toString(), 'kind': 'note'};
+    }).toList();
+  }
+
+  Future<void> _addMemoryDialog() async {
+    final textController = TextEditingController();
+    String kind = 'note';
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: JeonColors.surface,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, setSheetState) => Padding(
+          padding: EdgeInsets.only(
+            left: 16,
+            right: 16,
+            top: 16,
+            bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 16,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text('Tambah Memory', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600, color: JeonColors.ink)),
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 8,
+                children: ['note', 'fact'].map((k) {
+                  final active = kind == k;
+                  return ChoiceChip(
+                    label: Text(k),
+                    selected: active,
+                    onSelected: (_) => setSheetState(() => kind = k),
+                    selectedColor: JeonColors.accentGlow,
+                    backgroundColor: JeonColors.surface2,
+                    labelStyle: TextStyle(fontSize: 12, color: active ? JeonColors.accent : JeonColors.inkMuted),
+                    side: BorderSide(color: active ? JeonColors.accent : JeonColors.border),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: textController,
+                autofocus: true,
+                maxLines: 3,
+                style: const TextStyle(fontSize: 13.4, color: JeonColors.ink),
+                decoration: InputDecoration(
+                  hintText: 'Contoh: Suka kopi tanpa gula',
+                  hintStyle: const TextStyle(color: JeonColors.inkFaint),
+                  filled: true,
+                  fillColor: JeonColors.surface2,
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(JeonRadius.card), borderSide: const BorderSide(color: JeonColors.border)),
+                ),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                height: 44,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.of(sheetContext).pop(true),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: JeonColors.accent,
+                    foregroundColor: const Color(0xFF04150A),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(JeonRadius.pill)),
+                  ),
+                  child: const Text('Simpan', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    final text = textController.text.trim();
+    if (saved == true && text.isNotEmpty) {
+      try {
+        await widget.api.getMemory(action: 'add', kind: kind, text: text);
+        await _loadMemory();
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Gagal menyimpan: $e')));
+      }
+    }
+  }
+
+  Future<void> _deleteMemory(int index) async {
+    try {
+      await widget.api.getMemory(action: 'remove', index: index);
+      await _loadMemory();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Gagal hapus: $e')));
+    }
+  }
+
+  Widget _memoryContent() {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: SizedBox(
+            width: double.infinity,
+            height: 44,
+            child: ElevatedButton.icon(
+              onPressed: _addMemoryDialog,
+              icon: const Icon(Icons.add, size: 18, color: Color(0xFF04150A)),
+              label: const Text('Tambah Memory', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: JeonColors.accent,
+                foregroundColor: const Color(0xFF04150A),
+                elevation: 0,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(JeonRadius.pill)),
+              ),
+            ),
+          ),
+        ),
+        if (_memoryError != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Text('⚠️ $_memoryError', style: const TextStyle(fontSize: 12, color: JeonColors.danger)),
+          ),
+        Expanded(
+          child: _memoryLoading
+              ? const Center(child: CircularProgressIndicator(color: JeonColors.accent))
+              : _memoryItems.isEmpty
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.psychology_outlined, size: 30, color: JeonColors.inkFaint),
+                            const SizedBox(height: 12),
+                            const Text('Belum ada memory. JeonAI belum tahu apa-apa soal kamu.',
+                                textAlign: TextAlign.center, style: TextStyle(fontSize: 12.5, color: JeonColors.inkFaint)),
+                          ],
+                        ),
+                      ),
+                    )
+                  : ListView.separated(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                      itemCount: _memoryItems.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemBuilder: (context, i) => _memoryCard(i, _memoryItems[i]),
+                    ),
+        ),
+      ],
+    );
+  }
+
+  Widget _memoryCard(int index, Map<String, dynamic> item) {
+    final kind = (item['kind'] ?? item['type'] ?? 'note').toString();
+    final text = (item['text'] ?? item['content'] ?? item['value'] ?? '').toString();
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: JeonColors.surface2,
+        border: Border.all(color: JeonColors.borderSoft),
+        borderRadius: BorderRadius.circular(JeonRadius.card),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(color: JeonColors.accentGlow, borderRadius: BorderRadius.circular(6)),
+            child: Text(kind, style: const TextStyle(fontSize: 10, color: JeonColors.accent, fontWeight: FontWeight.w600)),
+          ),
+          const SizedBox(width: 10),
+          Expanded(child: Text(text, style: const TextStyle(fontSize: 13, color: JeonColors.ink, height: 1.4))),
+          InkWell(
+            onTap: () => _deleteMemory(index),
+            child: const Padding(
+              padding: EdgeInsets.all(4),
+              child: Icon(Icons.delete_outline, size: 18, color: JeonColors.danger),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _persist() => _settings?.save() ?? Future.value();
@@ -226,6 +450,8 @@ class _SettingsCategoryScreenState extends State<_SettingsCategoryScreen> {
         return _generalContent();
       case SettingsCategory.personalization:
         return _personalizationContent();
+      case SettingsCategory.memory:
+        return _memoryContent();
       case SettingsCategory.securityLogin:
         return _securityContent();
       case SettingsCategory.dataControls:

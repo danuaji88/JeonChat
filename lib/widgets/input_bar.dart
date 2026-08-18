@@ -1,10 +1,13 @@
 import 'dart:async';
+import 'dart:convert';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 
+import '../services/api_service.dart' show ModelOption;
 import '../theme.dart';
 
 /// Bottom input bar JeonChat: [+] [Ketik pesan...] [model ▾] [🎤] [🔵].
@@ -29,6 +32,21 @@ class JeonChatInputBar extends StatefulWidget {
   final int activePluginCount;
   final VoidCallback? onOpenPlugins;
 
+  /// Model buat dropdown — dari GET /models 'options' atau fallback (lihat
+  /// ApiService.fallbackModelOptions), diambil parent supaya input_bar tetap
+  /// murni UI (tidak panggil ApiService langsung).
+  final List<ModelOption> modelOptions;
+
+  /// Gambar dipilih & di-base64-encode di sini, tapi panggilan API +
+  /// mutasi pesan tetap tanggung jawab parent (lewat callback ini).
+  final void Function(String base64Image, String mimeType) onAnalyzeImage;
+
+  /// Tombol ikon globe → dialog query → parent panggil webSearch().
+  final ValueChanged<String> onWebSearch;
+
+  /// "Upload Dokumen" di menu "+" — teks file sudah dibaca (UTF-8) di sini.
+  final void Function(String name, String text) onUploadDoc;
+
   const JeonChatInputBar({
     super.key,
     required this.quickReplies,
@@ -39,6 +57,10 @@ class JeonChatInputBar extends StatefulWidget {
     required this.onGenerateAudio,
     required this.onGenerateVideo,
     required this.onVoiceModeResult,
+    required this.modelOptions,
+    required this.onAnalyzeImage,
+    required this.onWebSearch,
+    required this.onUploadDoc,
     this.activePluginCount = 0,
     this.onOpenPlugins,
   });
@@ -48,15 +70,13 @@ class JeonChatInputBar extends StatefulWidget {
 }
 
 class _JeonChatInputBarState extends State<JeonChatInputBar> {
-  static const Map<String, String> _modelOptions = {
-    'Fast': 'jeon-fast',
-    'High': 'jeon-chat',
-    'Think': 'jeon-strong',
-  };
-
   final _controller = TextEditingController();
   bool _hasText = false;
-  String _selectedModelLabel = 'High';
+  ModelOption? _selectedModel;
+
+  ModelOption get _selected =>
+      _selectedModel ??
+      widget.modelOptions.firstWhere((o) => o.label == 'High', orElse: () => widget.modelOptions.first);
 
   final SpeechToText _speech = SpeechToText();
   bool _speechAvailable = false;
@@ -101,7 +121,7 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
   void _submit([String? preset]) {
     final text = (preset ?? _controller.text).trim();
     if (text.isEmpty) return;
-    widget.onSend(text, _modelOptions[_selectedModelLabel] ?? 'jeon-chat');
+    widget.onSend(text, _selected.value);
     _controller.clear();
   }
 
@@ -176,6 +196,150 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
     }
   }
 
+  /// Tombol ikon foto — pilih gambar, baca sebagai base64, kirim ke parent
+  /// buat ditampilkan sebagai bubble user + dianalisis lewat analyzeImage().
+  Future<void> _pickAndAnalyzeImage() async {
+    try {
+      final picked = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1280,
+        maxHeight: 1280,
+        imageQuality: 80,
+      );
+      if (picked == null) return;
+      final bytes = await picked.readAsBytes();
+      final base64Image = base64Encode(bytes);
+      widget.onAnalyzeImage(base64Image, _mimeFromName(picked.name));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Gagal memilih gambar: $e')),
+      );
+    }
+  }
+
+  String _mimeFromName(String name) {
+    final ext = name.contains('.') ? name.substring(name.lastIndexOf('.') + 1).toLowerCase() : 'jpg';
+    switch (ext) {
+      case 'png':
+        return 'image/png';
+      case 'gif':
+        return 'image/gif';
+      case 'webp':
+        return 'image/webp';
+      default:
+        return 'image/jpeg';
+    }
+  }
+
+  /// "Upload Dokumen" di menu "+" — baca isi file sebagai teks UTF-8 lalu
+  /// kirim ke parent buat di-upload via uploadDoc() (RAG).
+  Future<void> _uploadDocument() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(type: FileType.any, withData: true);
+      if (result == null || result.files.isEmpty) return;
+      final file = result.files.first;
+      final bytes = file.bytes;
+      if (bytes == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Tidak bisa membaca isi file ini')),
+        );
+        return;
+      }
+      String text;
+      try {
+        text = utf8.decode(bytes);
+      } catch (_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('File bukan teks (bukan UTF-8) — tidak bisa dibaca sebagai dokumen')),
+        );
+        return;
+      }
+      widget.onUploadDoc(file.name, text);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Gagal upload dokumen: $e')),
+      );
+    }
+  }
+
+  /// Tombol ikon globe — dialog input query lalu diteruskan ke parent
+  /// (webSearch(), hasil terstruktur — beda dari "+" → "Cari di Web" yang
+  /// lewat agent).
+  Future<void> _showWebSearchDialog() async {
+    final controller = TextEditingController();
+    final result = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: JeonColors.surface,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+      builder: (sheetContext) => Padding(
+        padding: EdgeInsets.only(
+          left: 16,
+          right: 16,
+          top: 16,
+          bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 16,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text('Cari di Web', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600, color: JeonColors.ink)),
+            const SizedBox(height: 10),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              maxLines: 1,
+              textInputAction: TextInputAction.search,
+              style: const TextStyle(fontSize: 13.4, color: JeonColors.ink),
+              decoration: InputDecoration(
+                hintText: 'Mau cari apa?',
+                hintStyle: const TextStyle(color: JeonColors.inkFaint),
+                filled: true,
+                fillColor: JeonColors.surface2,
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(JeonRadius.card),
+                  borderSide: const BorderSide(color: JeonColors.border),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(JeonRadius.card),
+                  borderSide: const BorderSide(color: JeonColors.border),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(JeonRadius.card),
+                  borderSide: const BorderSide(color: JeonColors.accent),
+                ),
+              ),
+              onSubmitted: (v) => Navigator.of(sheetContext).pop(v),
+            ),
+            const SizedBox(height: 14),
+            SizedBox(
+              height: 44,
+              child: ElevatedButton(
+                onPressed: () => Navigator.of(sheetContext).pop(controller.text.trim()),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: JeonColors.accent,
+                  foregroundColor: const Color(0xFF04150A),
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(JeonRadius.pill)),
+                ),
+                child: const Text('Cari', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    final query = result?.trim();
+    if (query == null || query.isEmpty) return;
+    widget.onWebSearch(query);
+  }
+
   Future<void> _showPlusMenu() async {
     await showModalBottomSheet(
       context: context,
@@ -195,6 +359,10 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
             _plusMenuTile(Icons.add_photo_alternate_outlined, 'Tambah Foto & File', onTap: () {
               Navigator.of(sheetContext).pop();
               _pickPhoto();
+            }),
+            _plusMenuTile(Icons.upload_file_outlined, 'Upload Dokumen', onTap: () {
+              Navigator.of(sheetContext).pop();
+              _uploadDocument();
             }),
             _plusMenuTile(Icons.image_outlined, 'Buat Gambar', onTap: () {
               Navigator.of(sheetContext).pop();
@@ -387,7 +555,17 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
                   ),
                 ),
                 _modelDropdown(),
-                const SizedBox(width: 4),
+                IconButton(
+                  icon: const Icon(Icons.public, size: 18, color: JeonColors.inkFaint),
+                  tooltip: 'Cari di web',
+                  onPressed: _showWebSearchDialog,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.image_outlined, size: 19, color: JeonColors.inkFaint),
+                  tooltip: 'Analisis gambar',
+                  onPressed: _pickAndAnalyzeImage,
+                ),
+                const SizedBox(width: 2),
                 if (_hasText)
                   Container(
                     decoration: const BoxDecoration(color: JeonColors.accent, shape: BoxShape.circle),
@@ -440,24 +618,34 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
       );
 
   Widget _modelDropdown() {
-    return PopupMenuButton<String>(
-      initialValue: _selectedModelLabel,
+    final selected = _selected;
+    return PopupMenuButton<ModelOption>(
+      initialValue: selected,
       color: JeonColors.surface2,
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(JeonRadius.small),
         side: const BorderSide(color: JeonColors.border),
       ),
-      onSelected: (v) => setState(() => _selectedModelLabel = v),
-      itemBuilder: (context) => _modelOptions.keys
-          .map((k) => PopupMenuItem(
-                value: k,
-                child: Text(
-                  k,
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    color: k == _selectedModelLabel ? JeonColors.accent : JeonColors.ink,
-                  ),
+      onSelected: (v) => setState(() => _selectedModel = v),
+      itemBuilder: (context) => widget.modelOptions
+          .map((o) => PopupMenuItem(
+                value: o,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (o.emoji.isNotEmpty) ...[
+                      Text(o.emoji, style: const TextStyle(fontSize: 13)),
+                      const SizedBox(width: 6),
+                    ],
+                    Text(
+                      o.label,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        color: o.value == selected.value ? JeonColors.accent : JeonColors.ink,
+                      ),
+                    ),
+                  ],
                 ),
               ))
           .toList(),
@@ -471,7 +659,11 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(_selectedModelLabel,
+            if (selected.emoji.isNotEmpty) ...[
+              Text(selected.emoji, style: const TextStyle(fontSize: 11.5)),
+              const SizedBox(width: 3),
+            ],
+            Text(selected.label,
                 style: const TextStyle(fontSize: 11.5, color: JeonColors.inkMuted, fontWeight: FontWeight.w600)),
             const SizedBox(width: 2),
             const Icon(Icons.expand_more, size: 14, color: JeonColors.inkFaint),
