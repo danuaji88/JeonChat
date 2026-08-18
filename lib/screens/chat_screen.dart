@@ -4,15 +4,19 @@ import '../models/agent.dart';
 import '../models/message.dart';
 import '../services/api_service.dart';
 import '../services/chat_history_service.dart';
+import '../services/profile_service.dart';
 import '../theme.dart';
 import '../widgets/agent_drawer.dart';
 import '../widgets/chat_bubble.dart';
 import '../widgets/context_sheet.dart';
+import '../widgets/typing_indicator.dart';
+import '../widgets/upgrade_dialog.dart';
 
 class ChatScreen extends StatefulWidget {
   final ApiService api;
+  final ProfileService profile;
 
-  const ChatScreen({super.key, required this.api});
+  const ChatScreen({super.key, required this.api, required this.profile});
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -22,8 +26,31 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   final _controller = TextEditingController();
   final _scrollController = ScrollController();
   bool _sending = false;
+  int _guestMessageCount = 0;
 
   late final AnimationController _pulseController;
+
+  // Deteksi file yang disebut agent (mis. "disimpan di /tmp/xxx.jpg") agar
+  // bisa ditampilkan sebagai preview gambar/audio, bukan cuma teks path.
+  static final _tmpFilePathRegex = RegExp(r'/tmp/[\w\-.]+\.\w+');
+  static const _imageExtensions = {'.jpg', '.jpeg', '.png', '.gif', '.webp'};
+  static const _audioExtensions = {'.mp3', '.wav', '.ogg', '.m4a', '.aac'};
+
+  ChatMessage _buildAgentMessage(String content) {
+    final match = _tmpFilePathRegex.firstMatch(content);
+    if (match == null) return ChatMessage(isUser: false, text: content);
+    final path = match.group(0)!;
+    final dot = path.lastIndexOf('.');
+    final ext = dot == -1 ? '' : path.substring(dot).toLowerCase();
+    final mediaUrl = '${widget.api.baseUrl}$path';
+    if (_imageExtensions.contains(ext)) {
+      return ChatMessage(isUser: false, text: content, imageUrl: mediaUrl);
+    }
+    if (_audioExtensions.contains(ext)) {
+      return ChatMessage(isUser: false, text: content, audioUrl: mediaUrl);
+    }
+    return ChatMessage(isUser: false, text: content, filePath: path);
+  }
 
   // ---- Quick replies (ala UI kit premium) ----
   static const List<String> _quickReplies = [
@@ -111,6 +138,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     setState(() {
       _messages = [..._messages, ChatMessage(isUser: true, text: text)];
       _sending = true;
+      _guestMessageCount++;
     });
     _controller.clear();
     // Simpan SEGERA setelah user message — walau request gagal, pesan user tetap tersimpan
@@ -126,7 +154,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
         _agentSession = result.agentSession;
       }
       setState(() {
-        _messages = [..._messages, ChatMessage(isUser: false, text: result.content)];
+        _messages = [..._messages, _buildAgentMessage(result.content)];
       });
       _saveHistory();
     } on AgentTimeoutException catch (e) {
@@ -161,6 +189,10 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       setState(() => _sending = false);
       _scrollToBottom();
     }
+
+    if (widget.api.isGuest && _guestMessageCount == 6 && mounted) {
+      showUpgradeDialog(context, api: widget.api, profile: widget.profile);
+    }
   }
 
   void _scrollToBottom() {
@@ -179,7 +211,13 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: JeonColors.bg,
-      drawer: AgentDrawer(agents: _agents),
+      drawer: AgentDrawer(
+        agents: _agents,
+        api: widget.api,
+        profile: widget.profile,
+        onClearHistory: _newChat,
+        onProfileChanged: () => setState(() {}),
+      ),
       appBar: AppBar(
         titleSpacing: 8,
         title: Row(
@@ -247,7 +285,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                 decoration: BoxDecoration(
                   color: JeonColors.accentGlow,
                   borderRadius: BorderRadius.circular(999),
-                  border: Border.all(color: JeonColors.accent.withOpacity(0.25)),
+                  border: Border.all(color: JeonColors.accent.withValues(alpha: 0.25)),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -290,8 +328,11 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                 : ListView.builder(
                     controller: _scrollController,
                     padding: const EdgeInsets.fromLTRB(14, 16, 14, 8),
-                    itemCount: _messages.length,
-                    itemBuilder: (context, i) => ChatBubble(message: _messages[i]),
+                    itemCount: _messages.length + (_sending ? 1 : 0),
+                    itemBuilder: (context, i) {
+                      if (i == _messages.length) return const TypingIndicator();
+                      return ChatBubble(message: _messages[i]);
+                    },
                   ),
           ),
           _composer(),
@@ -384,8 +425,8 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                 Expanded(
                   child: TextField(
                     controller: _controller,
-                    minLines: 1,
-                    maxLines: 4,
+                    maxLines: 1,
+                    textInputAction: TextInputAction.send,
                     style: const TextStyle(fontSize: 13.4, color: JeonColors.ink),
                     decoration: const InputDecoration(
                       hintText: 'Tanya JeonChat apa saja…',
