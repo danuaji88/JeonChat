@@ -767,7 +767,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text('JeonChat', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600)),
+                const Text('JEON Chat', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600)),
                 Row(
                   children: [
                     Container(
@@ -776,7 +776,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
                       decoration: const BoxDecoration(shape: BoxShape.circle, color: JeonColors.accent),
                     ),
                     const SizedBox(width: 5),
-                    const Text('online · deepseek-v4-flash',
+                    const Text('Online',
                         style: TextStyle(fontSize: 11, color: JeonColors.inkFaint)),
                   ],
                 ),

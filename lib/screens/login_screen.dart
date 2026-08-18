@@ -17,7 +17,6 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _baseUrlController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _obscurePassword = true;
@@ -27,12 +26,12 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void initState() {
     super.initState();
-    _baseUrlController.text = widget.api.baseUrl;
+    // Server URL selalu pakai default (https://chat.jeonlive.com) — tidak perlu input manual.
+    widget.api.baseUrl = ApiService.defaultBaseUrl;
   }
 
   @override
   void dispose() {
-    _baseUrlController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
@@ -44,7 +43,7 @@ class _LoginScreenState extends State<LoginScreen> {
       _loading = true;
       _error = null;
     });
-    widget.api.baseUrl = _baseUrlController.text.trim();
+    widget.api.baseUrl = ApiService.defaultBaseUrl;
     try {
       await widget.api.login(
         email: _emailController.text.trim(),
@@ -64,7 +63,7 @@ class _LoginScreenState extends State<LoginScreen> {
       _loading = true;
       _error = null;
     });
-    widget.api.baseUrl = _baseUrlController.text.trim();
+    widget.api.baseUrl = ApiService.defaultBaseUrl;
     try {
       await widget.api.continueAsGuest();
       await _goNext();
@@ -144,15 +143,6 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     const SizedBox(height: 16),
                   ],
-                  _label('Server URL'),
-                  const SizedBox(height: 6),
-                  _field(
-                    controller: _baseUrlController,
-                    hint: 'https://api.jeon.example.com',
-                    keyboardType: TextInputType.url,
-                    validator: (v) => (v == null || v.trim().isEmpty) ? 'Wajib diisi' : null,
-                  ),
-                  const SizedBox(height: 16),
                   _label('Email'),
                   const SizedBox(height: 6),
                   _field(

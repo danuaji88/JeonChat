@@ -82,7 +82,7 @@ class ApiService {
 
   Future<String> login({required String email, required String password}) async {
     if (!isConfigured) {
-      throw ApiException('Base URL belum diatur. Isi Server URL untuk login.');
+      throw ApiException('Base URL belum diatur.');
     }
     final res = await http
         .post(
