@@ -39,6 +39,13 @@ class ChatBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final isUser = message.isUser;
     final media = isUser ? null : _extractMediaUrl(message.text);
+    // Kalau ada media, jangan tampilkan markdown/URL mentahnya lagi di teks —
+    // gambarnya sudah dirender di atas, teks mentah cuma bikin duplikat.
+    String cleanText = message.text;
+    if (media != null) {
+      cleanText = message.text.replaceAll(_markdownImageRegex, '').trim();
+      cleanText = cleanText.replaceAll(_directImageUrlRegex, '').trim();
+    }
 
     final avatar = Container(
       width: 28,
@@ -98,7 +105,7 @@ class ChatBubble extends StatelessWidget {
             if (media != null)
               media.isVideo ? _videoUrlPlaceholder(media.url) : _markdownImagePreview(media.url),
             SelectableText(
-              message.text,
+              cleanText,
               style: TextStyle(
                 fontSize: 13.4,
                 color: isUser ? JeonColors.ink : JeonColors.ink,
@@ -112,6 +119,7 @@ class ChatBubble extends StatelessWidget {
             if (message.toolCall != null) ToolCardWidget(toolCall: message.toolCall!),
             if (message.imageUrl != null) _imagePreview(message.imageUrl!),
             if (message.audioUrl != null) AudioMessagePlayer(url: message.audioUrl!),
+            if (message.videoUrl != null) _videoCard(message.videoUrl!),
             if (message.filePath != null) _fileCard(message.filePath!),
             if (message.costChip != null || message.timeChip != null)
               Container(
@@ -156,8 +164,36 @@ class ChatBubble extends StatelessWidget {
             url,
             fit: BoxFit.cover,
             width: double.infinity,
-            errorBuilder: (c, e, s) =>
-                Text(url, style: const TextStyle(fontSize: 11, color: JeonColors.inkMuted)),
+            loadingBuilder: (context, child, progress) {
+              if (progress == null) return child;
+              return Container(
+                height: 180,
+                alignment: Alignment.center,
+                color: JeonColors.surface3,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: JeonColors.accent,
+                  value: progress.expectedTotalBytes != null
+                      ? progress.cumulativeBytesLoaded / progress.expectedTotalBytes!
+                      : null,
+                ),
+              );
+            },
+            errorBuilder: (context, error, stackTrace) => Container(
+              padding: const EdgeInsets.all(10),
+              alignment: Alignment.center,
+              color: JeonColors.surface3,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.broken_image_outlined, color: JeonColors.inkFaint, size: 24),
+                  const SizedBox(height: 6),
+                  Text(url,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 11, color: JeonColors.inkMuted)),
+                ],
+              ),
+            ),
           ),
         ),
       );
@@ -209,6 +245,49 @@ class ChatBubble extends StatelessWidget {
           ),
         ),
       );
+
+  Widget _videoCard(String url) {
+    final name = url.contains('/') ? url.substring(url.lastIndexOf('/') + 1) : url;
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+      decoration: BoxDecoration(
+        color: JeonColors.surface3,
+        border: Border.all(color: JeonColors.borderSoft),
+        borderRadius: BorderRadius.circular(JeonRadius.small),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration:
+                BoxDecoration(color: JeonColors.accentGlow, borderRadius: BorderRadius.circular(8)),
+            alignment: Alignment.center,
+            child: const Icon(Icons.play_circle_outline, size: 18, color: JeonColors.accent),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style:
+                        const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: JeonColors.ink)),
+                const Text('Video siap — player inline menyusul, buka link untuk tonton',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 10.5, color: JeonColors.inkFaint)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _fileCard(String path) {
     final name = path.contains('/') ? path.substring(path.lastIndexOf('/') + 1) : path;

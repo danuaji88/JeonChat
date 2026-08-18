@@ -291,6 +291,19 @@ class ApiService {
     return data['video_url']?.toString() ?? '';
   }
 
+  /// Generate video via /video endpoint.
+  Future<String> generateVideo(String promptText) async {
+    if (!isConfigured) throw ApiException('Base URL belum diatur.');
+    final res = await http
+        .post(_uri('/video'), headers: _headers, body: jsonEncode({'prompt': promptText}))
+        .timeout(const Duration(seconds: 180));
+    if (res.statusCode != 200) {
+      throw ApiException('Video gagal (${res.statusCode}): ${res.body}');
+    }
+    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    return (data['video_url'] ?? data['url'] ?? data['videoUrl'])?.toString() ?? '';
+  }
+
   /// Generate TTS via /tts endpoint (gratis: Edge Ardi)
   Future<String> generateTTS(String text) async {
     if (!isConfigured) throw ApiException('Base URL belum diatur.');

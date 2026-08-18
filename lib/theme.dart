@@ -1,24 +1,24 @@
 import 'package:flutter/material.dart';
 
-/// JeonChat design tokens — mirrors /opt/data/jeonchat_ui_mockup.html exactly.
+/// JeonChat design tokens — dark theme styled after ChatGPT Plus.
 class JeonColors {
-  static const bg = Color(0xFF0A0B0A);
-  static const surface = Color(0xFF101210);
-  static const surface2 = Color(0xFF161916);
-  static const surface3 = Color(0xFF1D211D);
-  static const border = Color(0xFF262B26);
-  static const borderSoft = Color(0xFF1A1E1A);
+  static const bg = Color(0xFF0D1117);
+  static const surface = Color(0xFF161B22);
+  static const surface2 = Color(0xFF1C2128);
+  static const surface3 = Color(0xFF21262D);
+  static const border = Color(0xFF30363D);
+  static const borderSoft = Color(0xFF21262D);
 
-  static const ink = Color(0xFFEEF3EE);
-  static const inkMuted = Color(0xFF9AA79A);
-  static const inkFaint = Color(0xFF5F6B5F);
+  static const ink = Color(0xFFE6EDF3);
+  static const inkMuted = Color(0xFF8B949E);
+  static const inkFaint = Color(0xFF6E7681);
 
-  static const accent = Color(0xFF22C55E);
-  static const accentDim = Color(0xFF1A9C49);
-  static const accentGlow = Color(0x2422C55E); // rgba(34,197,94,0.14)
+  static const accent = Color(0xFF58A6FF);
+  static const accentDim = Color(0xFF388BFD);
+  static const accentGlow = Color(0x2958A6FF); // rgba(88,166,255,0.16)
 
-  static const danger = Color(0xFFEF4444);
-  static const warn = Color(0xFFF59E0B);
+  static const danger = Color(0xFFF85149);
+  static const warn = Color(0xFFD29922);
 }
 
 class JeonRadius {

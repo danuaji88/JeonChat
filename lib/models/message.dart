@@ -39,6 +39,7 @@ class ChatMessage {
   final String? timeChip;
   final String? imageUrl;
   final String? audioUrl;
+  final String? videoUrl;
   final String? filePath;
 
   const ChatMessage({
@@ -49,6 +50,7 @@ class ChatMessage {
     this.timeChip,
     this.imageUrl,
     this.audioUrl,
+    this.videoUrl,
     this.filePath,
   });
 
@@ -67,6 +69,7 @@ class ChatMessage {
         if (timeChip != null) 'timeChip': timeChip,
         if (imageUrl != null) 'imageUrl': imageUrl,
         if (audioUrl != null) 'audioUrl': audioUrl,
+        if (videoUrl != null) 'videoUrl': videoUrl,
         if (filePath != null) 'filePath': filePath,
       };
 
@@ -80,6 +83,7 @@ class ChatMessage {
         timeChip: json['timeChip'] as String?,
         imageUrl: json['imageUrl'] as String?,
         audioUrl: json['audioUrl'] as String?,
+        videoUrl: json['videoUrl'] as String?,
         filePath: json['filePath'] as String?,
       );
 }
