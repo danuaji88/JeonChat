@@ -54,7 +54,7 @@ class ChatMessage {
     this.filePath,
   });
 
-  /// Shape expected by the JeonGPT-style backend: {role, content}.
+  /// Shape expected by the JEON backend: {role, content}.
   Map<String, dynamic> toApiJson() => {
         'role': isUser ? 'user' : 'assistant',
         'content': text,

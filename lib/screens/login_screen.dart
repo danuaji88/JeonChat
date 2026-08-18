@@ -79,7 +79,7 @@ class _LoginScreenState extends State<LoginScreen> {
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (_) => profile.onboarded
-            ? ChatScreen(api: widget.api, profile: profile)
+            ? JeonChatScreen(api: widget.api, profile: profile)
             : OnboardingProfileScreen(api: widget.api, profile: profile),
       ),
     );

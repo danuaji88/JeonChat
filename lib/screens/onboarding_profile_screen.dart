@@ -54,7 +54,7 @@ class _OnboardingProfileScreenState extends State<OnboardingProfileScreen> {
     } else {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (_) => ChatScreen(api: widget.api, profile: widget.profile),
+          builder: (_) => JeonChatScreen(api: widget.api, profile: widget.profile),
         ),
       );
     }

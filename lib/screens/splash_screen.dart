@@ -51,7 +51,7 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
     } else if (!profile.onboarded) {
       target = OnboardingProfileScreen(api: api, profile: profile);
     } else {
-      target = ChatScreen(api: api, profile: profile);
+      target = JeonChatScreen(api: api, profile: profile);
     }
     Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => target));
   }

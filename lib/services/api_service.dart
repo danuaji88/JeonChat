@@ -5,12 +5,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/message.dart';
 
-/// Thin client for the shared JeonGPT/JeonChat backend API.
+/// Thin client for the shared JEON backend API (chat.jeonlive.com).
 ///
-/// Endpoints (same backend as JeonGPT — /opt/data/jeongpt_api.py):
+/// Endpoints actually verified against the live server:
 ///   GET  /models
-///   POST /chat          body: {messages, model, session_id}
-///   POST /chat/history  body: {session_id}
+///   POST /chat   body: {messages: [{role, content}], model, session_id} → {content, ...}
+///   POST /agent  body: {prompt, session_id?} → {content, agent_session, ...}
+/// Note: there is no working /chat/history endpoint on this backend (confirmed
+/// 404) — conversation lists are managed locally via ChatHistoryService.
 class ApiService {
   String baseUrl;
   String apiKey;
@@ -251,10 +253,11 @@ class ApiService {
   }
 
   /// Generate image via /image endpoint (gratis: Pollinations)
-  Future<String> generateImage(String promptText) async {
+  Future<String> generateImage(String promptText, {bool allowAi = true}) async {
     if (!isConfigured) throw ApiException('Base URL belum diatur.');
     final res = await http
-        .post(_uri('/image'), headers: _headers, body: jsonEncode({'prompt': promptText}))
+        .post(_uri('/image'),
+            headers: _headers, body: jsonEncode({'prompt': promptText, 'allow_ai': allowAi}))
         .timeout(const Duration(seconds: 90));
     if (res.statusCode != 200) {
       throw ApiException('Image gagal (${res.statusCode})');
