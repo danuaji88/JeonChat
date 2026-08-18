@@ -47,6 +47,10 @@ class JeonChatInputBar extends StatefulWidget {
   /// "Upload Dokumen" di menu "+" — teks file sudah dibaca (UTF-8) di sini.
   final void Function(String name, String text) onUploadDoc;
 
+  /// Tombol ikon code — buka Code Interpreter (parent yang push route-nya,
+  /// biar bisa lewat auth gate dulu kayak Library/Plugins).
+  final VoidCallback? onOpenCodeInterpreter;
+
   const JeonChatInputBar({
     super.key,
     required this.quickReplies,
@@ -63,6 +67,7 @@ class JeonChatInputBar extends StatefulWidget {
     required this.onUploadDoc,
     this.activePluginCount = 0,
     this.onOpenPlugins,
+    this.onOpenCodeInterpreter,
   });
 
   @override
@@ -555,6 +560,11 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
                   ),
                 ),
                 _modelDropdown(),
+                IconButton(
+                  icon: const Icon(Icons.code_rounded, size: 19, color: JeonColors.inkFaint),
+                  tooltip: 'Code Interpreter',
+                  onPressed: widget.onOpenCodeInterpreter,
+                ),
                 IconButton(
                   icon: const Icon(Icons.public, size: 18, color: JeonColors.inkFaint),
                   tooltip: 'Cari di web',

@@ -10,8 +10,10 @@ import '../services/plugin_service.dart';
 import '../services/profile_service.dart';
 import '../theme.dart';
 import 'auth_gate_screen.dart';
+import 'code_screen.dart';
 import 'library_screen.dart';
 import 'plugins_screen.dart';
+import 'skills_screen.dart';
 import '../widgets/chat_bubble.dart';
 import '../widgets/context_sheet.dart';
 import '../widgets/input_bar.dart';
@@ -630,12 +632,28 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
 
   Future<void> _handleDocRequest(String query, ChatMessage typing) async {
     try {
-      final answer = await widget.api.askDoc(query);
+      final result = await widget.api.askDoc(query);
+      final answer = (result['answer'] ?? result['content'] ?? '').toString();
       _resolveTyping(typing, ChatMessage(isUser: false, text: answer));
     } catch (e) {
       _resolveTyping(typing, ChatMessage(isUser: false, text: '⚠️ Gagal menjawab dari dokumen: $e'));
     }
     _saveHistory();
+  }
+
+  /// Tombol ikon code di input bar — buka CodeScreen; kalau user pilih
+  /// "Kirim ke Chat" di sana, hasilnya (code+output/error) ditambahkan
+  /// sebagai pesan AI (dirender via ChatMessage.codeResult).
+  Future<void> _openCodeInterpreter() async {
+    final result = await Navigator.of(context).push<Map<String, String>>(
+      MaterialPageRoute(builder: (_) => CodeScreen(api: widget.api)),
+    );
+    if (result == null || !mounted) return;
+    setState(() {
+      _messages = [..._messages, ChatMessage(isUser: false, text: 'Hasil Code Interpreter:', codeResult: result)];
+    });
+    _saveHistory();
+    _scrollToBottom();
   }
 
   /// Tombol ikon foto di input bar — gambar sudah dibaca+base64 di sana,
@@ -822,9 +840,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       onOpenMore: () {
         if (!isWide) Navigator.of(context).maybePop();
         _requireAuth(() {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Fitur ini segera hadir'), duration: Duration(seconds: 1)),
-          );
+          Navigator.of(context).push(MaterialPageRoute(builder: (_) => SkillsScreen(api: widget.api)));
         });
       },
       installedPlugins: _installedPlugins,
@@ -974,6 +990,9 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
               _scrollToBottom();
             },
             onUploadDoc: _uploadDoc,
+            onOpenCodeInterpreter: () => _requireAuth(() {
+              _openCodeInterpreter();
+            }),
           ),
         ],
       ),

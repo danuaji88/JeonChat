@@ -51,6 +51,10 @@ class ChatMessage {
   /// hasil pencarian.
   final List<Map<String, String>>? searchResults;
 
+  /// Hasil runCode() dari Code Interpreter — {code, output} atau
+  /// {code, error} — dirender sebagai blok kode + output di chat_bubble.dart.
+  final Map<String, String>? codeResult;
+
   const ChatMessage({
     required this.isUser,
     required this.text,
@@ -63,6 +67,7 @@ class ChatMessage {
     this.filePath,
     this.isAnalysis = false,
     this.searchResults,
+    this.codeResult,
   });
 
   /// Shape expected by the JEON backend: {role, content}.
@@ -84,6 +89,7 @@ class ChatMessage {
         if (filePath != null) 'filePath': filePath,
         if (isAnalysis) 'isAnalysis': isAnalysis,
         if (searchResults != null) 'searchResults': searchResults,
+        if (codeResult != null) 'codeResult': codeResult,
       };
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) => ChatMessage(
@@ -103,5 +109,6 @@ class ChatMessage {
             ?.whereType<Map>()
             .map((e) => e.map((k, v) => MapEntry(k.toString(), v.toString())))
             .toList(),
+        codeResult: (json['codeResult'] as Map?)?.map((k, v) => MapEntry(k.toString(), v.toString())),
       );
 }

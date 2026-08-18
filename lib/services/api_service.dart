@@ -206,15 +206,8 @@ class ApiService {
   /// /models sudah menyertakan field 'options'. Kalau field itu tidak ada
   /// atau requestnya gagal, caller pakai [fallbackModelOptions].
   Future<List<ModelOption>> getModelOptions() async {
-    if (!isConfigured) throw ApiException('Base URL belum diatur di Settings.');
-    final res = await http
-        .get(_uri('/models'), headers: _headers)
-        .timeout(_shortTimeout, onTimeout: () => throw ApiException('Timeout: server tidak merespons.'));
-    if (res.statusCode != 200) {
-      throw ApiException('Gagal memuat model (${res.statusCode})');
-    }
-    final data = jsonDecode(res.body);
-    final rawOptions = (data is Map<String, dynamic>) ? data['options'] : null;
+    final data = await _get('/models');
+    final rawOptions = data['options'];
     if (rawOptions is! List || rawOptions.isEmpty) {
       throw ApiException('Model options tidak ditemukan pada respons /models');
     }
@@ -242,89 +235,102 @@ class ApiService {
     ModelOption(label: 'Opus', value: 'anthropic/claude-opus-5', emoji: '💎'),
   ];
 
-  /// Analisis gambar via /analyze — [base64Image] tanpa prefix data URI.
-  Future<String> analyzeImage(String base64Image, {String prompt = 'Jelaskan gambar ini'}) async {
+  /// Helper POST generik — decode JSON balasan jadi Map, lempar ApiException
+  /// kalau gagal/timeout. Dipakai method-method fitur AI di bawah supaya
+  /// tidak mengulang boilerplate headers/timeout/status-check.
+  Future<Map<String, dynamic>> _post(String path, Map<String, dynamic> body, {Duration? timeout}) async {
     if (!isConfigured) throw ApiException('Base URL belum diatur.');
     final res = await http
-        .post(_uri('/analyze'), headers: _headers,
-            body: jsonEncode({'image_base64': base64Image, 'prompt': prompt}))
-        .timeout(const Duration(seconds: 60));
+        .post(_uri(path), headers: _headers, body: jsonEncode(body))
+        .timeout(timeout ?? _shortTimeout, onTimeout: () => throw ApiException('Timeout: server tidak merespons.'));
     if (res.statusCode != 200) {
-      throw ApiException('Analisis gambar gagal (${res.statusCode}): ${res.body}');
-    }
-    final data = jsonDecode(res.body);
-    if (data is Map<String, dynamic>) {
-      return (data['content'] ?? data['result'] ?? data['answer'] ?? '').toString();
-    }
-    return data.toString();
-  }
-
-  /// Memory user via /memory — action get/add/remove sesuai kebutuhan
-  /// caller (kind+text untuk add, index untuk remove).
-  Future<Map<String, dynamic>> getMemory({
-    String action = 'get',
-    String? kind,
-    String? text,
-    int? index,
-  }) async {
-    if (!isConfigured) throw ApiException('Base URL belum diatur.');
-    final body = {
-      'action': action,
-      if (kind != null) 'kind': kind,
-      if (text != null) 'text': text,
-      if (index != null) 'index': index,
-    };
-    final res = await http
-        .post(_uri('/memory'), headers: _headers, body: jsonEncode(body))
-        .timeout(_shortTimeout);
-    if (res.statusCode != 200) {
-      throw ApiException('Memory gagal (${res.statusCode}): ${res.body}');
+      throw ApiException('$path gagal (${res.statusCode}): ${res.body}');
     }
     final data = jsonDecode(res.body);
     return data is Map<String, dynamic> ? data : {'data': data};
   }
 
-  /// Web search via /websearch.
-  Future<List<Map<String, dynamic>>> webSearch(String query) async {
+  /// Helper GET generik — sama seperti [_post] tapi tanpa body.
+  Future<Map<String, dynamic>> _get(String path, {Duration? timeout}) async {
     if (!isConfigured) throw ApiException('Base URL belum diatur.');
     final res = await http
-        .post(_uri('/websearch'), headers: _headers,
-            body: jsonEncode({'query': query, 'max_results': 5}))
-        .timeout(const Duration(seconds: 30));
+        .get(_uri(path), headers: _headers)
+        .timeout(timeout ?? _shortTimeout, onTimeout: () => throw ApiException('Timeout: server tidak merespons.'));
     if (res.statusCode != 200) {
-      throw ApiException('Web search gagal (${res.statusCode}): ${res.body}');
+      throw ApiException('$path gagal (${res.statusCode}): ${res.body}');
     }
     final data = jsonDecode(res.body);
-    final list = (data is List)
-        ? data
-        : (data is Map<String, dynamic> ? (data['results'] ?? data['data'] ?? []) : []);
-    return (list as List).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+    return data is Map<String, dynamic> ? data : {'data': data};
   }
 
-  /// Upload dokumen buat RAG via /upload — return doc_id.
-  Future<String> uploadDoc(String name, String text) async {
-    if (!isConfigured) throw ApiException('Base URL belum diatur.');
-    final res = await http
-        .post(_uri('/upload'), headers: _headers, body: jsonEncode({'name': name, 'text': text}))
-        .timeout(const Duration(seconds: 60));
-    if (res.statusCode != 200) {
-      throw ApiException('Upload dokumen gagal (${res.statusCode}): ${res.body}');
-    }
-    final data = jsonDecode(res.body) as Map<String, dynamic>;
-    return (data['doc_id'] ?? data['id'] ?? '').toString();
+  /// Analisis gambar via /analyze — [base64Image] tanpa prefix data URI.
+  Future<String> analyzeImage(
+    String base64Image, {
+    String prompt = 'Jelaskan gambar ini secara detail dalam bahasa Indonesia.',
+  }) async {
+    final res = await _post('/analyze', {'image_base64': base64Image, 'prompt': prompt},
+        timeout: const Duration(seconds: 60));
+    return (res['content'] ?? 'Error: tidak ada respons').toString();
   }
+
+  // ---- Memory: get semua, tambah, hapus per index (dikelompokkan per
+  // [kind]), dan pencarian semantik via /memory. ----
+
+  Future<Map<String, dynamic>> getMemory() => _post('/memory', {'action': 'get'});
+
+  Future<void> addMemory(String kind, String text) =>
+      _post('/memory', {'action': 'add', 'kind': kind, 'text': text});
+
+  Future<void> removeMemory(String kind, int index) =>
+      _post('/memory', {'action': 'remove', 'kind': kind, 'index': index});
+
+  Future<List<dynamic>> searchMemory(String query) async {
+    final res = await _post('/memory', {'action': 'search', 'query': query});
+    return (res['results'] as List?) ?? [];
+  }
+
+  /// Web search via /websearch.
+  Future<List<dynamic>> webSearch(String query) async {
+    final res = await _post('/websearch', {'query': query, 'max_results': 5}, timeout: const Duration(seconds: 30));
+    return (res['results'] as List?) ?? [];
+  }
+
+  /// Upload dokumen buat RAG via /upload.
+  Future<Map<String, dynamic>> uploadDoc(String name, String text) =>
+      _post('/upload', {'name': name, 'text': text}, timeout: const Duration(seconds: 60));
 
   /// Tanya isi dokumen yang sudah di-upload via /ask.
-  Future<String> askDoc(String query) async {
-    if (!isConfigured) throw ApiException('Base URL belum diatur.');
-    final res = await http
-        .post(_uri('/ask'), headers: _headers, body: jsonEncode({'query': query}))
-        .timeout(const Duration(seconds: 60));
-    if (res.statusCode != 200) {
-      throw ApiException('Tanya dokumen gagal (${res.statusCode}): ${res.body}');
-    }
-    final data = jsonDecode(res.body) as Map<String, dynamic>;
-    return (data['answer'] ?? data['content'] ?? '').toString();
+  Future<Map<String, dynamic>> askDoc(String query) =>
+      _post('/ask', {'query': query}, timeout: const Duration(seconds: 60));
+
+  /// Speech-to-text server-side via /stt — pelengkap dikte on-device
+  /// (speech_to_text package, sudah dipakai input bar); disiapkan untuk alur
+  /// yang kirim rekaman audio langsung, belum ada perekam audio di app ini.
+  Future<String> speechToText(String base64Audio) async {
+    final res = await _post('/stt', {'audio_base64': base64Audio}, timeout: const Duration(seconds: 30));
+    return (res['text'] ?? '').toString();
+  }
+
+  /// Code Interpreter via /code.
+  Future<Map<String, dynamic>> runCode(String code) =>
+      _post('/code', {'code': code}, timeout: const Duration(seconds: 60));
+
+  // ---- Custom Skills (CRUD) via /skills. ----
+
+  Future<List<dynamic>> listSkills() async {
+    final res = await _post('/skills', {'action': 'list'});
+    return (res['skills'] as List?) ?? [];
+  }
+
+  Future<Map<String, dynamic>> createSkill(String name, String desc, String instruction) => _post(
+      '/skills', {'action': 'create', 'name': name, 'description': desc, 'instruction': instruction});
+
+  Future<void> deleteSkill(String skillId) => _post('/skills', {'action': 'delete', 'skill_id': skillId});
+
+  Future<String> runSkill(String skillId, String input) async {
+    final res = await _post('/skills', {'action': 'run', 'skill_id': skillId, 'input': input},
+        timeout: const Duration(seconds: 60));
+    return (res['content'] ?? 'Error').toString();
   }
 
   Future<String> sendChat({

@@ -141,6 +141,7 @@ class ChatBubble extends StatelessWidget {
             if (message.filePath != null) _fileCard(message.filePath!),
             if (message.searchResults != null && message.searchResults!.isNotEmpty)
               _searchResultsList(message.searchResults!),
+            if (message.codeResult != null) _codeResultCard(message.codeResult!),
             if (message.costChip != null || message.timeChip != null)
               Container(
                 margin: const EdgeInsets.only(top: 9),
@@ -372,6 +373,45 @@ class ChatBubble extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontSize: 10.5, color: JeonColors.inkFaint)),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _codeResultCard(Map<String, String> result) {
+    final code = result['code'] ?? '';
+    final output = result['output'] ?? '';
+    final error = result['error'] ?? '';
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0D0D0D),
+        border: Border.all(color: JeonColors.borderSoft),
+        borderRadius: BorderRadius.circular(JeonRadius.small),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (code.isNotEmpty)
+            SelectableText(code,
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 11.5, color: JeonColors.ink, height: 1.4)),
+          if (output.isNotEmpty) ...[
+            const Padding(
+              padding: EdgeInsets.only(top: 8, bottom: 2),
+              child: Text('Output', style: TextStyle(fontSize: 10, color: JeonColors.inkFaint, fontWeight: FontWeight.w600)),
+            ),
+            SelectableText(output,
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 11.5, color: _analysisGreen, height: 1.4)),
+          ],
+          if (error.isNotEmpty) ...[
+            const Padding(
+              padding: EdgeInsets.only(top: 8, bottom: 2),
+              child: Text('Error', style: TextStyle(fontSize: 10, color: JeonColors.danger, fontWeight: FontWeight.w600)),
+            ),
+            SelectableText(error,
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 11.5, color: JeonColors.danger, height: 1.4)),
           ],
         ],
       ),

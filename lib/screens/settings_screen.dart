@@ -204,6 +204,14 @@ class _SettingsCategoryScreenState extends State<_SettingsCategoryScreen> {
   bool _memoryLoading = false;
   String? _memoryError;
 
+  // ---- Memory: pencarian semantik (searchMemory) — null = tampilkan
+  // _memoryItems biasa, non-null = tampilkan hasil pencarian (read-only,
+  // tidak ada tombol delete karena index/kind hasil pencarian belum tentu
+  // selaras dengan posisi di daftar penuh). ----
+  final _memorySearchController = TextEditingController();
+  List<Map<String, dynamic>>? _memorySearchResults;
+  bool _memorySearching = false;
+
   @override
   void initState() {
     super.initState();
@@ -214,13 +222,19 @@ class _SettingsCategoryScreenState extends State<_SettingsCategoryScreen> {
     if (widget.category == SettingsCategory.memory) _loadMemory();
   }
 
+  @override
+  void dispose() {
+    _memorySearchController.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadMemory() async {
     setState(() {
       _memoryLoading = true;
       _memoryError = null;
     });
     try {
-      final data = await widget.api.getMemory(action: 'get');
+      final data = await widget.api.getMemory();
       final items = _extractMemoryItems(data);
       if (!mounted) return;
       setState(() {
@@ -243,6 +257,34 @@ class _SettingsCategoryScreenState extends State<_SettingsCategoryScreen> {
       if (e is Map) return Map<String, dynamic>.from(e);
       return <String, dynamic>{'text': e.toString(), 'kind': 'note'};
     }).toList();
+  }
+
+  Future<void> _searchMemory(String query) async {
+    final q = query.trim();
+    if (q.isEmpty) {
+      setState(() => _memorySearchResults = null);
+      return;
+    }
+    setState(() => _memorySearching = true);
+    try {
+      final raw = await widget.api.searchMemory(q);
+      if (!mounted) return;
+      setState(() {
+        _memorySearchResults = raw
+            .map((e) => e is Map ? Map<String, dynamic>.from(e) : <String, dynamic>{'text': e.toString()})
+            .toList();
+        _memorySearching = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _memorySearching = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Pencarian gagal: $e')));
+    }
+  }
+
+  void _clearMemorySearch() {
+    _memorySearchController.clear();
+    setState(() => _memorySearchResults = null);
   }
 
   Future<void> _addMemoryDialog() async {
@@ -321,7 +363,7 @@ class _SettingsCategoryScreenState extends State<_SettingsCategoryScreen> {
     final text = textController.text.trim();
     if (saved == true && text.isNotEmpty) {
       try {
-        await widget.api.getMemory(action: 'add', kind: kind, text: text);
+        await widget.api.addMemory(kind, text);
         await _loadMemory();
       } catch (e) {
         if (!mounted) return;
@@ -330,9 +372,9 @@ class _SettingsCategoryScreenState extends State<_SettingsCategoryScreen> {
     }
   }
 
-  Future<void> _deleteMemory(int index) async {
+  Future<void> _deleteMemory(String kind, int index) async {
     try {
-      await widget.api.getMemory(action: 'remove', index: index);
+      await widget.api.removeMemory(kind, index);
       await _loadMemory();
     } catch (e) {
       if (!mounted) return;
@@ -340,11 +382,53 @@ class _SettingsCategoryScreenState extends State<_SettingsCategoryScreen> {
     }
   }
 
+  Widget _memorySearchBar() => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        child: Container(
+          height: 40,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(
+            color: JeonColors.surface2,
+            borderRadius: BorderRadius.circular(JeonRadius.card),
+            border: Border.all(color: JeonColors.border),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.search, size: 17, color: JeonColors.inkFaint),
+              const SizedBox(width: 8),
+              Expanded(
+                child: TextField(
+                  controller: _memorySearchController,
+                  onSubmitted: _searchMemory,
+                  style: const TextStyle(fontSize: 13, color: JeonColors.ink),
+                  decoration: const InputDecoration(
+                    hintText: 'Cari memory (semantik)...',
+                    hintStyle: TextStyle(color: JeonColors.inkFaint),
+                    border: InputBorder.none,
+                    isDense: true,
+                  ),
+                ),
+              ),
+              if (_memorySearching)
+                const SizedBox(
+                    width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: JeonColors.accent))
+              else if (_memorySearchResults != null)
+                InkWell(
+                  onTap: _clearMemorySearch,
+                  child: const Icon(Icons.close, size: 16, color: JeonColors.inkFaint),
+                ),
+            ],
+          ),
+        ),
+      );
+
   Widget _memoryContent() {
+    final displayItems = _memorySearchResults ?? _memoryItems;
+    final isSearchMode = _memorySearchResults != null;
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
           child: SizedBox(
             width: double.infinity,
             height: 44,
@@ -361,6 +445,7 @@ class _SettingsCategoryScreenState extends State<_SettingsCategoryScreen> {
             ),
           ),
         ),
+        _memorySearchBar(),
         if (_memoryError != null)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -369,33 +454,40 @@ class _SettingsCategoryScreenState extends State<_SettingsCategoryScreen> {
         Expanded(
           child: _memoryLoading
               ? const Center(child: CircularProgressIndicator(color: JeonColors.accent))
-              : _memoryItems.isEmpty
+              : displayItems.isEmpty
                   ? Center(
                       child: Padding(
                         padding: const EdgeInsets.all(24),
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(Icons.psychology_outlined, size: 30, color: JeonColors.inkFaint),
+                            Icon(isSearchMode ? Icons.search_off : Icons.psychology_outlined,
+                                size: 30, color: JeonColors.inkFaint),
                             const SizedBox(height: 12),
-                            const Text('Belum ada memory. JeonAI belum tahu apa-apa soal kamu.',
-                                textAlign: TextAlign.center, style: TextStyle(fontSize: 12.5, color: JeonColors.inkFaint)),
+                            Text(
+                              isSearchMode
+                                  ? 'Tidak ada memory yang cocok.'
+                                  : 'Belum ada memory. JeonAI belum tahu apa-apa soal kamu.',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(fontSize: 12.5, color: JeonColors.inkFaint),
+                            ),
                           ],
                         ),
                       ),
                     )
                   : ListView.separated(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                      itemCount: _memoryItems.length,
+                      itemCount: displayItems.length,
                       separatorBuilder: (_, __) => const SizedBox(height: 8),
-                      itemBuilder: (context, i) => _memoryCard(i, _memoryItems[i]),
+                      itemBuilder: (context, i) =>
+                          _memoryCard(displayItems[i], index: isSearchMode ? null : i),
                     ),
         ),
       ],
     );
   }
 
-  Widget _memoryCard(int index, Map<String, dynamic> item) {
+  Widget _memoryCard(Map<String, dynamic> item, {int? index}) {
     final kind = (item['kind'] ?? item['type'] ?? 'note').toString();
     final text = (item['text'] ?? item['content'] ?? item['value'] ?? '').toString();
     return Container(
@@ -415,13 +507,14 @@ class _SettingsCategoryScreenState extends State<_SettingsCategoryScreen> {
           ),
           const SizedBox(width: 10),
           Expanded(child: Text(text, style: const TextStyle(fontSize: 13, color: JeonColors.ink, height: 1.4))),
-          InkWell(
-            onTap: () => _deleteMemory(index),
-            child: const Padding(
-              padding: EdgeInsets.all(4),
-              child: Icon(Icons.delete_outline, size: 18, color: JeonColors.danger),
+          if (index != null)
+            InkWell(
+              onTap: () => _deleteMemory(kind, index),
+              child: const Padding(
+                padding: EdgeInsets.all(4),
+                child: Icon(Icons.delete_outline, size: 18, color: JeonColors.danger),
+              ),
             ),
-          ),
         ],
       ),
     );
