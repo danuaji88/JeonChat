@@ -113,6 +113,8 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       _sending = true;
     });
     _controller.clear();
+    // Simpan SEGERA setelah user message — walau request gagal, pesan user tetap tersimpan
+    _saveHistory();
     _scrollToBottom();
 
     try {
