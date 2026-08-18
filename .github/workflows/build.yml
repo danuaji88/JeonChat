@@ -47,6 +47,9 @@ jobs:
       - name: Flutter pub get
         run: flutter pub get
 
+      - name: Configure Web
+        run: flutter create . --platforms web
+
       - name: Build Web
         run: flutter build web --release
 
