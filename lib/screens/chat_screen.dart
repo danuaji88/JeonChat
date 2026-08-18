@@ -24,7 +24,7 @@ class JeonChatScreen extends StatefulWidget {
   State<JeonChatScreen> createState() => _JeonChatScreenState();
 }
 
-class _JeonChatScreenState extends State<JeonChatScreen> with SingleTickerProviderStateMixin {
+class _JeonChatScreenState extends State<JeonChatScreen> {
   final _scrollController = ScrollController();
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   int _guestMessageCount = 0;
@@ -38,8 +38,6 @@ class _JeonChatScreenState extends State<JeonChatScreen> with SingleTickerProvid
   // ---- Projects ----
   List<Map<String, dynamic>> _projects = [];
   String? _activeProjectId;
-
-  late final AnimationController _pulseController;
 
   // Deteksi file yang disebut agent (mis. "disimpan di /tmp/xxx.jpg") agar
   // bisa ditampilkan sebagai preview gambar/audio, bukan cuma teks path.
@@ -71,12 +69,6 @@ class _JeonChatScreenState extends State<JeonChatScreen> with SingleTickerProvid
   ];
 
   // ---- Demo data (mirrors /opt/data/jeonchat_ui_mockup.html) ----
-  final List<Agent> _agents = const [
-    Agent(name: 'AI Clipper', task: 'Memotong video_umkm_02.mp4', status: AgentStatus.running),
-    Agent(name: 'Media Generator', task: 'Render 3 gambar produk', status: AgentStatus.running),
-    Agent(name: 'Report Builder', task: 'Idle', status: AgentStatus.idle),
-  ];
-
   final List<TaskItem> _tasks = const [
     TaskItem(text: 'Transkripsi video (large-v3)', sub: 'Selesai · 18.2s', done: true),
     TaskItem(text: 'Deteksi momen viral', sub: '5 momen ditemukan', done: true),
@@ -104,7 +96,6 @@ class _JeonChatScreenState extends State<JeonChatScreen> with SingleTickerProvid
   @override
   void initState() {
     super.initState();
-    _pulseController = AnimationController(vsync: this, duration: const Duration(seconds: 2))..repeat(reverse: true);
     _loadConversations();
   }
 
@@ -348,12 +339,9 @@ class _JeonChatScreenState extends State<JeonChatScreen> with SingleTickerProvid
 
   @override
   void dispose() {
-    _pulseController.dispose();
     _scrollController.dispose();
     super.dispose();
   }
-
-  int get _runningCount => _agents.where((a) => a.status == AgentStatus.running).length;
 
   Future<void> _send(String text, String model) async {
     final trimmed = text.trim();
@@ -747,35 +735,6 @@ class _JeonChatScreenState extends State<JeonChatScreen> with SingleTickerProvid
                 ),
               );
             },
-          ),
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: Center(
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-                decoration: BoxDecoration(
-                  color: JeonColors.accentGlow,
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(color: JeonColors.accent.withValues(alpha: 0.25)),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    FadeTransition(
-                      opacity: _pulseController,
-                      child: Container(
-                        width: 6,
-                        height: 6,
-                        decoration: const BoxDecoration(shape: BoxShape.circle, color: JeonColors.accent),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Text('$_runningCount agent bekerja',
-                        style: const TextStyle(fontSize: 11.5, color: JeonColors.accent)),
-                  ],
-                ),
-              ),
-            ),
           ),
         ],
       ),
