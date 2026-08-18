@@ -10,7 +10,7 @@ import 'upgrade_dialog.dart';
 
 /// Bottom-sheet menu profil (Upgrade plan / Personalization / Profile /
 /// Settings / Help / Logout) — dipakai bersama oleh AgentDrawer dan
-/// SidebarChatGPT supaya perilakunya konsisten di kedua tempat.
+/// JeonChatSidebar supaya perilakunya konsisten di kedua tempat.
 Future<void> showProfileMenu(
   BuildContext context, {
   required ApiService api,

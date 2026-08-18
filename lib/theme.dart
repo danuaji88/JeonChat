@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// JeonChat design tokens — dark theme styled after ChatGPT Plus.
+/// JeonChat design tokens — pitch-dark theme, blue accent.
 class JeonColors {
   static const bg = Color(0xFF0D1117);
   static const surface = Color(0xFF161B22);
@@ -9,8 +9,8 @@ class JeonColors {
   static const border = Color(0xFF30363D);
   static const borderSoft = Color(0xFF21262D);
 
-  static const ink = Color(0xFFE6EDF3);
-  static const inkMuted = Color(0xFF8B949E);
+  static const ink = Color(0xFFFFFFFF);
+  static const inkMuted = Color(0xFF9B9B9B);
   static const inkFaint = Color(0xFF6E7681);
 
   static const accent = Color(0xFF58A6FF);
@@ -51,6 +51,6 @@ ThemeData buildJeonTheme() {
           bodyColor: JeonColors.ink,
           displayColor: JeonColors.ink,
         ),
-    fontFamily: 'Roboto',
+    // Font sistem default — hindari nambah dependency/asset cuma buat font.
   );
 }

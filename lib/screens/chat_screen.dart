@@ -1,10 +1,6 @@
-import 'dart:async';
-
 import 'package:audioplayers/audioplayers.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
-import 'package:speech_to_text/speech_to_text.dart';
 
 import '../models/agent.dart';
 import '../models/message.dart';
@@ -14,45 +10,30 @@ import '../services/profile_service.dart';
 import '../theme.dart';
 import '../widgets/chat_bubble.dart';
 import '../widgets/context_sheet.dart';
-import '../widgets/sidebar_chatgpt.dart';
+import '../widgets/input_bar.dart';
+import '../widgets/sidebar_jeonchat.dart';
 import '../widgets/upgrade_dialog.dart';
 
-class ChatScreen extends StatefulWidget {
+class JeonChatScreen extends StatefulWidget {
   final ApiService api;
   final ProfileService profile;
 
-  const ChatScreen({super.key, required this.api, required this.profile});
+  const JeonChatScreen({super.key, required this.api, required this.profile});
 
   @override
-  State<ChatScreen> createState() => _ChatScreenState();
+  State<JeonChatScreen> createState() => _JeonChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateMixin {
-  final _controller = TextEditingController();
+class _JeonChatScreenState extends State<JeonChatScreen> with SingleTickerProviderStateMixin {
   final _scrollController = ScrollController();
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   int _guestMessageCount = 0;
-  bool _hasText = false;
 
-  // ---- Sidebar ala ChatGPT + multi-conversation ----
+  // ---- Sidebar JeonChat + multi-conversation ----
   String? _conversationId;
   List<Map<String, dynamic>> _conversations = [];
   bool? _sidebarOpenOverride; // null = pakai default responsif (terbuka di web/desktop)
   double _messagesOpacity = 1.0; // fade 150ms saat pindah conversation
-
-  // ---- Model selector ("Fast" / "High" / "Think") ----
-  static const Map<String, String> _modelOptions = {
-    'Fast': 'jeon-fast',
-    'High': 'jeon-chat',
-    'Think': 'jeon-strong',
-  };
-  String _selectedModelLabel = 'High';
-  String get _selectedModel => _modelOptions[_selectedModelLabel] ?? 'jeon-chat';
-
-  // ---- Mic dikte + mode suara (speech_to_text) ----
-  final SpeechToText _speech = SpeechToText();
-  bool _speechAvailable = false;
-  bool _isListening = false;
 
   late final AnimationController _pulseController;
 
@@ -120,91 +101,16 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   void initState() {
     super.initState();
     _pulseController = AnimationController(vsync: this, duration: const Duration(seconds: 2))..repeat(reverse: true);
-    _controller.addListener(() {
-      final has = _controller.text.trim().isNotEmpty;
-      if (has != _hasText) setState(() => _hasText = has);
-    });
-    _initSpeech();
     _loadConversations();
   }
 
-  Future<void> _initSpeech() async {
-    try {
-      final available = await _speech.initialize(
-        onStatus: (status) {
-          if (status == 'notListening' || status == 'done') {
-            if (mounted) setState(() => _isListening = false);
-          }
-        },
-        onError: (_) {
-          if (mounted) setState(() => _isListening = false);
-        },
-      );
-      if (!mounted) return;
-      setState(() => _speechAvailable = available);
-    } catch (_) {
-      // Mic/speech recognition tidak tersedia di browser ini — tombol mic
-      // akan otomatis nonaktif, sisa fitur chat tetap jalan normal.
-    }
-  }
-
-  Future<void> _toggleMic() async {
-    if (!_speechAvailable) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Mic tidak tersedia/diizinkan di browser ini')),
-      );
-      return;
-    }
-    if (_isListening) {
-      await _speech.stop();
-      if (mounted) setState(() => _isListening = false);
-      return;
-    }
-    setState(() => _isListening = true);
-    await _speech.listen(
-      onResult: (result) {
-        if (!mounted) return;
-        setState(() {
-          _controller.text = result.recognizedWords;
-          _controller.selection = TextSelection.collapsed(offset: _controller.text.length);
-        });
-      },
-    );
-  }
-
-  /// "Mode suara" — dengar satu ucapan, kirim sebagai pesan, lalu bacakan
-  /// balasan AI-nya lewat TTS. Bukan percakapan realtime penuh (backend
-  /// belum punya endpoint voice streaming), tapi tiap tombolnya benar-benar
-  /// jalan: dengar → kirim → dengar balasannya.
-  Future<void> _startVoiceMode() async {
-    if (!_speechAvailable) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Mic tidak tersedia/diizinkan di browser ini')),
-      );
-      return;
-    }
-    if (_isListening) return;
-
-    final completer = Completer<String>();
-    setState(() => _isListening = true);
-    await _speech.listen(
-      onResult: (result) {
-        if (result.finalResult && !completer.isCompleted) {
-          completer.complete(result.recognizedWords);
-        }
-      },
-    );
-    final recognized = await completer.future.timeout(
-      const Duration(seconds: 20),
-      onTimeout: () => '',
-    );
-    await _speech.stop();
-    if (mounted) setState(() => _isListening = false);
-
-    final spoken = recognized.trim();
-    if (spoken.isEmpty) return;
-
-    await _send(spoken);
+  /// Dipanggil JeonChatInputBar setelah mode Voice selesai mendengarkan —
+  /// kirim ucapan sebagai pesan biasa, lalu bacakan balasan AI-nya lewat
+  /// TTS. Bukan percakapan realtime penuh (backend belum punya endpoint
+  /// voice streaming), tapi alurnya (dengar → kirim → dengar balasan) jalan
+  /// sungguhan.
+  Future<void> _onVoiceModeResult(String spoken) async {
+    await _send(spoken, 'jeon-chat');
 
     final lastReply = _messages.isNotEmpty && !_messages.last.isUser ? _messages.last.text : null;
     if (lastReply == null || lastReply.isEmpty || lastReply.startsWith('⚠️') || lastReply.startsWith('⏳')) {
@@ -373,24 +279,21 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   @override
   void dispose() {
     _pulseController.dispose();
-    _controller.dispose();
     _scrollController.dispose();
-    _speech.stop();
     super.dispose();
   }
 
   int get _runningCount => _agents.where((a) => a.status == AgentStatus.running).length;
 
-  Future<void> _send([String? preset]) async {
-    final text = (preset ?? _controller.text).trim();
-    if (text.isEmpty) return;
+  Future<void> _send(String text, String model) async {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return;
     setState(() {
-      _messages = [..._messages, ChatMessage(isUser: true, text: text)];
+      _messages = [..._messages, ChatMessage(isUser: true, text: trimmed)];
       _guestMessageCount++;
       // Typing indicator — selalu tampil untuk setiap pesan baru
       _messages = [..._messages, ChatMessage(isUser: false, text: '⏳ AI sedang bekerja...')];
     });
-    _controller.clear();
     _saveHistory();
     _scrollToBottom();
 
@@ -399,30 +302,30 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     }
 
     // ── Deteksi media request → langsung pakai /media/* endpoint (cepat, gratis) ──
-    final lower = text.toLowerCase();
+    final lower = trimmed.toLowerCase();
     final isImageRequest = lower.contains('buat gambar') || lower.contains('buat konten gambar') || lower.contains('generate gambar') || lower.contains('cari gambar');
     final isVideoRequest = lower.contains('buat video') || lower.contains('buat konten video') || lower.contains('cari video');
     final isAudioRequest = lower.contains('buat suara') || lower.contains('buat konten suara') || lower.contains('text to speech') || lower.contains('tts') || lower.contains('voice over');
     final isCostRequest = lower.contains('cek biaya') || lower.contains('cek cost') || lower.contains('biaya') || lower.contains('harga');
 
     if (isImageRequest || isVideoRequest || isAudioRequest) {
-      await _handleMediaRequest(text, isImageRequest, isVideoRequest, isAudioRequest);
+      await _handleMediaRequest(trimmed, isImageRequest, isVideoRequest, isAudioRequest);
       return;
     }
     if (isCostRequest) {
-      await _handleCostRequest();
+      await _handleCostRequest(model);
       return;
     }
 
     // ── Normal: agent / chat ──
-    await _handleChatRequest(text);
+    await _handleChatRequest(trimmed, model);
   }
 
-  Future<void> _handleCostRequest() async {
+  Future<void> _handleCostRequest(String model) async {
     try {
       final reply = await widget.api.sendChat(
         history: _messages.where((m) => !m.text.startsWith('⏳')).toList(),
-        model: _selectedModel,
+        model: model,
       );
       setState(() {
         _messages = _messages.sublist(0, _messages.length - 1); // hapus typing
@@ -493,13 +396,13 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
         _messages = [..._messages, ChatMessage(isUser: false, text: '⚠️ Media gagal: $e\nMencoba via agent...')];
       });
       _saveHistory();
-      await _handleChatRequest(text);
+      await _handleChatRequest(text, 'jeon-chat');
     } finally {
       _scrollToBottom();
     }
   }
 
-  Future<void> _handleChatRequest(String text) async {
+  Future<void> _handleChatRequest(String text, String model) async {
     try {
       final result = await widget.api.sendAgentPrompt(
         prompt: text,
@@ -518,7 +421,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       try {
         final reply = await widget.api.sendChat(
           history: _messages.where((m) => !m.text.startsWith('⏳')).toList(),
-          model: _selectedModel,
+          model: model,
         );
         setState(() {
           _messages = _messages.sublist(0, _messages.length - 1);
@@ -543,7 +446,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       try {
         final reply = await widget.api.sendChat(
           history: _messages,
-          model: _selectedModel,
+          model: model,
         );
         setState(() {
           _messages = [..._messages, ChatMessage(isUser: false, text: reply)];
@@ -563,23 +466,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     }
   }
 
-  // ---- Aksi popover "+": tiap tombol benar-benar panggil backend ----
-
-  Future<void> _pickFileAttachment() async {
-    try {
-      final result = await FilePicker.platform.pickFiles(type: FileType.any);
-      if (result == null || result.files.isEmpty || !mounted) return;
-      final name = result.files.first.name;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Terpilih: $name — upload file belum didukung backend saat ini')),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Gagal membuka file picker: $e')),
-      );
-    }
-  }
+  // ---- Aksi popover "+" JeonChatInputBar: tiap callback benar-benar panggil backend ----
 
   Future<void> _generateImageDirect(String prompt) async {
     setState(() {
@@ -652,137 +539,9 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
 
   // Tidak ada endpoint /search khusus di backend — dikirim lewat /agent
   // (endpoint tools-lengkap) dengan instruksi eksplisit, bukan sekadar UI.
-  Future<void> _searchWeb(String query) => _send('Cari di internet: $query');
+  Future<void> _searchWeb(String query) => _send('Cari di internet: $query', 'jeon-chat');
 
-  Future<void> _deepResearch(String topic) => _send('Lakukan riset mendalam tentang: $topic');
-
-  Future<void> _showPlusMenu() async {
-    await showModalBottomSheet(
-      context: context,
-      backgroundColor: JeonColors.surface,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
-      builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 10),
-            Container(
-              width: 36,
-              height: 4,
-              decoration: BoxDecoration(color: JeonColors.surface3, borderRadius: BorderRadius.circular(2)),
-            ),
-            const SizedBox(height: 6),
-            _plusMenuTile(Icons.add_photo_alternate_outlined, 'Tambah foto & file', onTap: () {
-              Navigator.of(sheetContext).pop();
-              _pickFileAttachment();
-            }),
-            _plusMenuTile(Icons.image_outlined, 'Buat gambar', onTap: () {
-              Navigator.of(sheetContext).pop();
-              _promptFor('Buat gambar', 'Gambar apa yang mau dibuat?', _generateImageDirect);
-            }),
-            _plusMenuTile(Icons.travel_explore_outlined, 'Cari di web', onTap: () {
-              Navigator.of(sheetContext).pop();
-              _promptFor('Cari di web', 'Mau cari apa?', _searchWeb);
-            }),
-            _plusMenuTile(Icons.science_outlined, 'Riset mendalam', onTap: () {
-              Navigator.of(sheetContext).pop();
-              _promptFor('Riset mendalam', 'Topik riset apa?', _deepResearch);
-            }),
-            _plusMenuTile(Icons.graphic_eq_rounded, 'Buat suara', onTap: () {
-              Navigator.of(sheetContext).pop();
-              _promptFor('Buat suara', 'Teks yang mau dibacakan?', _generateAudioDirect);
-            }),
-            _plusMenuTile(Icons.movie_creation_outlined, 'Buat video', onTap: () {
-              Navigator.of(sheetContext).pop();
-              _promptFor('Buat video', 'Video apa yang mau dibuat?', _generateVideoDirect);
-            }),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _plusMenuTile(IconData icon, String label, {required VoidCallback onTap}) {
-    return ListTile(
-      onTap: onTap,
-      leading: Icon(icon, size: 19, color: JeonColors.ink),
-      title: Text(label, style: const TextStyle(fontSize: 13.6, color: JeonColors.ink)),
-    );
-  }
-
-  /// Bottom sheet input pendek dipakai semua aksi popover "+" — ambil satu
-  /// baris teks lalu jalankan [handler] dengannya.
-  Future<void> _promptFor(String title, String hint, Future<void> Function(String) handler) async {
-    final controller = TextEditingController();
-    final result = await showModalBottomSheet<String>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: JeonColors.surface,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
-      builder: (sheetContext) => Padding(
-        padding: EdgeInsets.only(
-          left: 16,
-          right: 16,
-          top: 16,
-          bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 16,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(title, style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600, color: JeonColors.ink)),
-            const SizedBox(height: 10),
-            TextField(
-              controller: controller,
-              autofocus: true,
-              maxLines: 1,
-              textInputAction: TextInputAction.send,
-              style: const TextStyle(fontSize: 13.4, color: JeonColors.ink),
-              decoration: InputDecoration(
-                hintText: hint,
-                hintStyle: const TextStyle(color: JeonColors.inkFaint),
-                filled: true,
-                fillColor: JeonColors.surface2,
-                isDense: true,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(JeonRadius.card),
-                  borderSide: const BorderSide(color: JeonColors.border),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(JeonRadius.card),
-                  borderSide: const BorderSide(color: JeonColors.border),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(JeonRadius.card),
-                  borderSide: const BorderSide(color: JeonColors.accent),
-                ),
-              ),
-              onSubmitted: (v) => Navigator.of(sheetContext).pop(v),
-            ),
-            const SizedBox(height: 14),
-            SizedBox(
-              height: 44,
-              child: ElevatedButton(
-                onPressed: () => Navigator.of(sheetContext).pop(controller.text.trim()),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: JeonColors.accent,
-                  foregroundColor: const Color(0xFF04150A),
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(JeonRadius.pill)),
-                ),
-                child: const Text('Kirim', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-    final trimmed = result?.trim();
-    if (trimmed == null || trimmed.isEmpty) return;
-    await handler(trimmed);
-  }
+  Future<void> _deepResearch(String topic) => _send('Lakukan riset mendalam tentang: $topic', 'jeon-chat');
 
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -801,7 +560,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     final isWide = MediaQuery.of(context).size.width >= 600;
     final sidebarOpen = _sidebarOpenOverride ?? true;
 
-    final sidebar = SidebarChatGPT(
+    final sidebar = JeonChatSidebar(
       api: widget.api,
       profile: widget.profile,
       conversations: _conversations,
@@ -969,7 +728,16 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                     ),
             ),
           ),
-          _composer(),
+          JeonChatInputBar(
+            quickReplies: _quickReplies,
+            onSend: _send,
+            onGenerateImage: _generateImageDirect,
+            onSearchWeb: _searchWeb,
+            onDeepResearch: _deepResearch,
+            onGenerateAudio: _generateAudioDirect,
+            onGenerateVideo: _generateVideoDirect,
+            onVoiceModeResult: _onVoiceModeResult,
+          ),
         ],
       ),
     );
@@ -1022,147 +790,4 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     );
   }
 
-  Widget _composer() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 6, 12, 14),
-      child: Column(
-        children: [
-          // Quick reply chips (ala UI kit premium)
-          SizedBox(
-            height: 34,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 2),
-              itemCount: _quickReplies.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 8),
-              itemBuilder: (context, i) {
-                final q = _quickReplies[i];
-                return GestureDetector(
-                  onTap: () => _send(q),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: JeonColors.surface2,
-                      border: Border.all(color: JeonColors.border),
-                      borderRadius: BorderRadius.circular(JeonRadius.pill),
-                    ),
-                    child: Text(q, style: const TextStyle(fontSize: 12, color: JeonColors.inkMuted)),
-                  ),
-                );
-              },
-            ),
-          ),
-          const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.fromLTRB(4, 4, 6, 4),
-            decoration: BoxDecoration(
-              color: JeonColors.surface2,
-              border: Border.all(color: JeonColors.border),
-              borderRadius: BorderRadius.circular(JeonRadius.pill),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.add, size: 20, color: JeonColors.inkMuted),
-                  tooltip: 'Tambah',
-                  onPressed: _showPlusMenu,
-                ),
-                Expanded(
-                  child: TextField(
-                    controller: _controller,
-                    minLines: 1,
-                    maxLines: 1,
-                    textInputAction: TextInputAction.send,
-                    style: const TextStyle(fontSize: 13.4, color: JeonColors.ink),
-                    decoration: const InputDecoration(
-                      hintText: 'Ask JeonChat...',
-                      hintStyle: TextStyle(color: JeonColors.inkFaint),
-                      border: InputBorder.none,
-                      isDense: true,
-                      contentPadding: EdgeInsets.symmetric(vertical: 10),
-                    ),
-                    onSubmitted: (_) => _send(),
-                  ),
-                ),
-                _modelDropdown(),
-                const SizedBox(width: 4),
-                if (_hasText)
-                  Container(
-                    decoration: const BoxDecoration(color: JeonColors.accent, shape: BoxShape.circle),
-                    child: IconButton(
-                      icon: const Icon(Icons.arrow_upward_rounded, size: 17, color: Color(0xFF04150A)),
-                      onPressed: _send,
-                    ),
-                  )
-                else ...[
-                  IconButton(
-                    icon: Icon(
-                      _isListening ? Icons.mic : Icons.mic_none_rounded,
-                      size: 19,
-                      color: _isListening ? JeonColors.accent : JeonColors.inkFaint,
-                    ),
-                    tooltip: 'Dikte suara',
-                    onPressed: _toggleMic,
-                  ),
-                  Container(
-                    margin: const EdgeInsets.only(left: 2),
-                    decoration: const BoxDecoration(color: JeonColors.accent, shape: BoxShape.circle),
-                    child: IconButton(
-                      icon: const Icon(Icons.graphic_eq_rounded, size: 17, color: Color(0xFF04150A)),
-                      tooltip: 'Mode suara',
-                      onPressed: _startVoiceMode,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _modelDropdown() {
-    return PopupMenuButton<String>(
-      initialValue: _selectedModelLabel,
-      color: JeonColors.surface2,
-      surfaceTintColor: Colors.transparent,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(JeonRadius.small),
-        side: const BorderSide(color: JeonColors.border),
-      ),
-      onSelected: (v) => setState(() => _selectedModelLabel = v),
-      itemBuilder: (context) => _modelOptions.keys
-          .map((k) => PopupMenuItem(
-                value: k,
-                child: Text(
-                  k,
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    color: k == _selectedModelLabel ? JeonColors.accent : JeonColors.ink,
-                  ),
-                ),
-              ))
-          .toList(),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-        decoration: BoxDecoration(
-          color: JeonColors.surface3,
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: JeonColors.border),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(_selectedModelLabel,
-                style: const TextStyle(fontSize: 11.5, color: JeonColors.inkMuted, fontWeight: FontWeight.w600)),
-            const SizedBox(width: 2),
-            const Icon(Icons.expand_more, size: 14, color: JeonColors.inkFaint),
-          ],
-        ),
-      ),
-    );
-  }
 }

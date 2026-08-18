@@ -4,9 +4,9 @@ import '../services/api_service.dart';
 import '../services/profile_service.dart';
 import 'profile_menu_sheet.dart';
 
-/// Sidebar kiri ala ChatGPT: header, "New chat", nav statis, daftar
-/// percakapan (Pinned/Chats) dengan rename/pin/delete, dan footer profil.
-class SidebarChatGPT extends StatefulWidget {
+/// Sidebar kiri JeonChat: header, "New chat", nav statis, mode Chat/Work,
+/// daftar percakapan (Pinned/Chats) dengan rename/pin/delete, dan footer profil.
+class JeonChatSidebar extends StatefulWidget {
   final ApiService api;
   final ProfileService profile;
   final List<Map<String, dynamic>> conversations;
@@ -20,7 +20,7 @@ class SidebarChatGPT extends StatefulWidget {
   final VoidCallback? onClearHistory;
   final VoidCallback? onProfileChanged;
 
-  const SidebarChatGPT({
+  const JeonChatSidebar({
     super.key,
     required this.api,
     required this.profile,
@@ -37,10 +37,10 @@ class SidebarChatGPT extends StatefulWidget {
   });
 
   @override
-  State<SidebarChatGPT> createState() => _SidebarChatGPTState();
+  State<JeonChatSidebar> createState() => _JeonChatSidebarState();
 }
 
-class _SidebarChatGPTState extends State<SidebarChatGPT> {
+class _JeonChatSidebarState extends State<JeonChatSidebar> {
   static const _bg = Color(0xFF000000);
   static const _ink = Colors.white;
   static const _inkMuted = Colors.white70;
@@ -52,6 +52,8 @@ class _SidebarChatGPTState extends State<SidebarChatGPT> {
   bool _searchOpen = false;
   final _searchController = TextEditingController();
   String _query = '';
+  bool _workMode = false;
+  bool _projectsExpanded = false;
 
   @override
   void dispose() {
@@ -78,17 +80,19 @@ class _SidebarChatGPTState extends State<SidebarChatGPT> {
           _header(),
           if (_searchOpen) _searchField(),
           _newChatButton(),
-          const SizedBox(height: 4),
+          const SizedBox(height: 6),
+          _modeToggle(),
+          const SizedBox(height: 6),
           _navItem(Icons.auto_stories_outlined, 'Library'),
           _navItem(Icons.schedule_outlined, 'Scheduled'),
-          _navItem(Icons.alternate_email, 'Plugins'),
-          _navItem(Icons.cloud_outlined, 'Codex'),
+          _navItem(Icons.extension_outlined, 'Plugins'),
           _navItem(Icons.more_horiz, 'More'),
           const SizedBox(height: 6),
           Expanded(
             child: ListView(
               padding: EdgeInsets.zero,
               children: [
+                _projectsSection(),
                 if (pinned.isNotEmpty) ...[
                   _sectionLabel('Pinned'),
                   ...pinned.map(_conversationRow),
@@ -165,7 +169,7 @@ class _SidebarChatGPTState extends State<SidebarChatGPT> {
       );
 
   Widget _newChatButton() => Padding(
-        padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
+        padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
         child: InkWell(
           borderRadius: BorderRadius.circular(10),
           hoverColor: _hoverBg,
@@ -180,9 +184,50 @@ class _SidebarChatGPTState extends State<SidebarChatGPT> {
               children: [
                 Icon(Icons.edit_outlined, size: 16, color: _ink),
                 SizedBox(width: 10),
-                Text('New chat', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w500, color: _ink)),
+                Text('New Chat', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w500, color: _ink)),
               ],
             ),
+          ),
+        ),
+      );
+
+  /// Toggle Chat/Work — murni visual untuk sekarang; belum ada perbedaan
+  /// endpoint/perilaku yang didefinisikan untuk mode "Work".
+  Widget _modeToggle() => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: Container(
+          padding: const EdgeInsets.all(3),
+          decoration: BoxDecoration(
+            color: const Color(0xFF171717),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: _borderColor),
+          ),
+          child: Row(
+            children: [
+              _modeSegment('Chat', !_workMode),
+              _modeSegment('Work', _workMode),
+            ],
+          ),
+        ),
+      );
+
+  Widget _modeSegment(String label, bool active) => Expanded(
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => setState(() => _workMode = label == 'Work'),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            padding: const EdgeInsets.symmetric(vertical: 7),
+            decoration: BoxDecoration(
+              color: active ? _activeBg : Colors.transparent,
+              borderRadius: BorderRadius.circular(999),
+            ),
+            alignment: Alignment.center,
+            child: Text(label,
+                style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: active ? FontWeight.w600 : FontWeight.normal,
+                    color: active ? _ink : _inkFaint)),
           ),
         ),
       );
@@ -203,6 +248,37 @@ class _SidebarChatGPTState extends State<SidebarChatGPT> {
             ),
           ),
         ),
+      );
+
+  Widget _projectsSection() => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            onTap: () => setState(() => _projectsExpanded = !_projectsExpanded),
+            hoverColor: _hoverBg,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 12, 6),
+              child: Row(
+                children: [
+                  const Icon(Icons.folder_outlined, size: 15, color: _inkFaint),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text('Projects',
+                        style:
+                            TextStyle(fontSize: 11, color: _inkFaint, fontWeight: FontWeight.w600)),
+                  ),
+                  Icon(_projectsExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                      size: 16, color: _inkFaint),
+                ],
+              ),
+            ),
+          ),
+          if (_projectsExpanded)
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
+              child: Text('Belum ada project', style: TextStyle(fontSize: 11.5, color: _inkFaint)),
+            ),
+        ],
       );
 
   Widget _sectionLabel(String text) => Padding(
@@ -419,7 +495,7 @@ class _SidebarChatGPTState extends State<SidebarChatGPT> {
                 ],
               ),
             ),
-            const Icon(Icons.unfold_more_rounded, size: 16, color: _inkFaint),
+            const Icon(Icons.settings_outlined, size: 16, color: _inkFaint),
           ],
         ),
       ),

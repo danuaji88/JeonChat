@@ -2,9 +2,11 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/message.dart';
 
-/// Simpan & muat percakapan (multi-conversation, ala sidebar ChatGPT) ke
-/// SharedPreferences (localStorage di web). Tiap conversation:
+/// Simpan & muat percakapan multi-conversation ke SharedPreferences
+/// (localStorage di web). Tiap conversation:
 /// {id, title, messages, pinned, createdAt, updatedAt, agentSession}.
+/// Ini SATU-SATUNYA sumber daftar riwayat chat — backend tidak punya
+/// endpoint /chat/history yang berfungsi (dicek, hasilnya 404).
 class ChatHistoryService {
   static const _conversationsKey = 'jeon_chat_conversations';
 
