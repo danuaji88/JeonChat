@@ -138,11 +138,91 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       _messages = [..._messages, ChatMessage(isUser: true, text: text)];
       _sending = true;
       _guestMessageCount++;
+      // Typing indicator
+      _messages = [..._messages, ChatMessage(isUser: false, text: '⏳ AI sedang bekerja...')];
     });
     _controller.clear();
     _saveHistory();
     _scrollToBottom();
 
+    // ── Deteksi media request → langsung pakai /media/* endpoint (cepat, gratis) ──
+    final lower = text.toLowerCase();
+    final isImageRequest = lower.contains('buat gambar') || lower.contains('buat konten gambar') || lower.contains('generate gambar') || lower.contains('cari gambar');
+    final isVideoRequest = lower.contains('buat video') || lower.contains('buat konten video') || lower.contains('cari video');
+    final isAudioRequest = lower.contains('buat suara') || lower.contains('buat konten suara') || lower.contains('text to speech') || lower.contains('tts') || lower.contains('voice over');
+
+    if (isImageRequest || isVideoRequest || isAudioRequest) {
+      await _handleMediaRequest(text, isImageRequest, isVideoRequest, isAudioRequest);
+      return;
+    }
+
+    // ── Normal: agent / chat ──
+    await _handleChatRequest(text);
+  }
+
+  Future<void> _handleMediaRequest(String text, bool isImg, bool isVid, bool isAudio) async {
+    try {
+      // Ekstrak prompt bersih dari teks user
+      String prompt = text;
+      for (final w in ['buat gambar', 'buat konten gambar', 'generate gambar', 'cari gambar',
+                        'buat video', 'buat konten video', 'cari video',
+                        'buat suara', 'buat konten suara', 'text to speech', 'tts', 'voice over',
+                        'yang gratis', 'gratis']) {
+        prompt = prompt.replaceAll(w, '');
+      }
+      prompt = prompt.trim();
+      if (prompt.isEmpty) prompt = text; // fallback ke teks asli
+
+      if (isImg) {
+        final imageUrl = await widget.api.generateMediaImage(prompt);
+        // Coba download ke lokal dulu via Image.network dari server kita (no CORS)
+        setState(() {
+          _messages = _messages.sublist(0, _messages.length - 1); // hapus typing
+          _messages = [..._messages, ChatMessage(
+            isUser: false,
+            text: '✅ Gambar siap! 📸\nPrompt: $prompt',
+            imageUrl: imageUrl,
+          )];
+        });
+        _saveHistory();
+      } else if (isVid) {
+        final videoUrl = await widget.api.generateMediaVideo(prompt);
+        setState(() {
+          _messages = _messages.sublist(0, _messages.length - 1);
+          _messages = [..._messages, ChatMessage(
+            isUser: false,
+            text: '✅ Video siap! 🎬\nPrompt: $prompt',
+            imageUrl: videoUrl, // pakai imageUrl dulu untuk preview (video player menyusul)
+          )];
+        });
+        _saveHistory();
+      } else if (isAudio) {
+        final audioUrl = await widget.api.generateTTS(prompt);
+        setState(() {
+          _messages = _messages.sublist(0, _messages.length - 1);
+          _messages = [..._messages, ChatMessage(
+            isUser: false,
+            text: '✅ Audio siap! 🔊\nTeks: $prompt',
+            audioUrl: audioUrl,
+          )];
+        });
+        _saveHistory();
+      }
+    } catch (e) {
+      // Fallback ke agent kalau media endpoint gagal
+      setState(() {
+        _messages = _messages.sublist(0, _messages.length - 1);
+        _messages = [..._messages, ChatMessage(isUser: false, text: '⚠️ Media gagal: $e\nMencoba via agent...')];
+      });
+      _saveHistory();
+      await _handleChatRequest(text);
+    } finally {
+      setState(() => _sending = false);
+      _scrollToBottom();
+    }
+  }
+
+  Future<void> _handleChatRequest(String text) async {
     try {
       final result = await widget.api.sendAgentPrompt(
         prompt: text,
@@ -152,23 +232,25 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
         _agentSession = result.agentSession;
       }
       setState(() {
+        _messages = _messages.sublist(0, _messages.length - 1); // hapus typing
         _messages = [..._messages, _buildAgentMessage(result.content)];
       });
       _saveHistory();
     } on AgentTimeoutException catch (e) {
-      // Agent timeout (request berat, mis. video/gambar) — auto-fallback ke
-      // /chat biasa alih-alih cuma menampilkan "masih bekerja" lalu berhenti.
+      // Agent timeout — auto-fallback ke /chat
       try {
         final reply = await widget.api.sendChat(
-          history: _messages,
+          history: _messages.where((m) => !m.text.startsWith('⏳')).toList(),
           model: 'jeon-chat',
         );
         setState(() {
+          _messages = _messages.sublist(0, _messages.length - 1);
           _messages = [..._messages, ChatMessage(isUser: false, text: reply)];
         });
         _saveHistory();
       } catch (e2) {
         setState(() {
+          _messages = _messages.sublist(0, _messages.length - 1);
           _messages = [
             ..._messages,
             ChatMessage(isUser: false, text: '⏳ ${e.toString()}'),
@@ -178,6 +260,9 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       }
     } catch (e) {
       // Fallback ke /chat kalau /agent gagal
+      setState(() {
+        _messages = _messages.sublist(0, _messages.length - 1);
+      });
       try {
         final reply = await widget.api.sendChat(
           history: _messages,
@@ -199,10 +284,6 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     } finally {
       setState(() => _sending = false);
       _scrollToBottom();
-    }
-
-    if (widget.api.isGuest && _guestMessageCount == 6 && mounted) {
-      showUpgradeDialog(context, api: widget.api, profile: widget.profile);
     }
   }
 
