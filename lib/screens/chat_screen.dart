@@ -54,9 +54,8 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
 
   // ---- Quick replies (ala UI kit premium) ----
   static const List<String> _quickReplies = [
-    'Buat konten video',
-    'Analisis video',
-    'Buat laporan',
+    'Buat konten gambar',
+    'Buat konten suara',
     'Cek biaya',
   ];
 
