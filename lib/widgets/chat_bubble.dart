@@ -7,7 +7,7 @@ import '../theme.dart';
 import 'audio_message_player.dart';
 import 'tool_card.dart';
 
-const _thinkingPlaceholder = '⏳ AI sedang bekerja...';
+const _thinkingPlaceholder = 'JeonAI Sedang Berpikir Lalu Eksekusi Mohon Ditunggu';
 
 class ChatBubble extends StatelessWidget {
   final ChatMessage message;
@@ -113,7 +113,10 @@ class ChatBubble extends StatelessWidget {
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: const [
-                  Text('⏳ AI sedang bekerja', style: TextStyle(fontSize: 13.4, color: JeonColors.ink, height: 1.4)),
+                  Flexible(
+                    child: Text('JeonAI Sedang Berpikir Lalu Eksekusi Mohon Ditunggu',
+                        style: TextStyle(fontSize: 13.4, color: JeonColors.ink, height: 1.4)),
+                  ),
                   _ThinkingDots(),
                 ],
               )

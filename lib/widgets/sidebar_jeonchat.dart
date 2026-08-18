@@ -29,6 +29,8 @@ class JeonChatSidebar extends StatefulWidget {
   final ValueChanged<String?> onSelectProject;
   final Future<void> Function(String name, String color, String icon) onCreateProject;
   final void Function(String id, String name) onRenameProject;
+  final Future<void> Function(String id, {required String name, required String description, required String color, required String icon}) onUpdateProjectSettings;
+  final void Function(String id, bool pinned) onPinProject;
   final void Function(String id, bool archived) onArchiveProject;
   final ValueChanged<String> onDeleteProject;
 
@@ -51,6 +53,8 @@ class JeonChatSidebar extends StatefulWidget {
     required this.onSelectProject,
     required this.onCreateProject,
     required this.onRenameProject,
+    required this.onUpdateProjectSettings,
+    required this.onPinProject,
     required this.onArchiveProject,
     required this.onDeleteProject,
     this.onClearHistory,
@@ -365,6 +369,10 @@ class _JeonChatSidebarState extends State<JeonChatSidebar> {
                 child: Text(name,
                     maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13, color: _ink)),
               ),
+              if (project['pinned'] == true) ...[
+                const Icon(Icons.push_pin, size: 12, color: _inkFaint),
+                const SizedBox(width: 4),
+              ],
               InkWell(
                 borderRadius: BorderRadius.circular(6),
                 onTap: () => _openProjectMenu(project),
@@ -382,6 +390,7 @@ class _JeonChatSidebarState extends State<JeonChatSidebar> {
 
   Future<void> _openProjectMenu(Map<String, dynamic> project) async {
     final id = project['id'] as String;
+    final pinned = project['pinned'] == true;
     await showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF171717),
@@ -396,36 +405,204 @@ class _JeonChatSidebarState extends State<JeonChatSidebar> {
               height: 4,
               decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
             ),
-            const SizedBox(height: 10),
-            ListTile(
-              leading: const Icon(Icons.edit_outlined, color: _ink, size: 19),
-              title: const Text('Rename', style: TextStyle(color: _ink, fontSize: 13.6)),
-              onTap: () async {
-                Navigator.of(sheetContext).pop();
-                await _promptRenameProject(project);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.archive_outlined, color: _ink, size: 19),
-              title: const Text('Archive', style: TextStyle(color: _ink, fontSize: 13.6)),
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                widget.onArchiveProject(id, true);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 19),
-              title: const Text('Delete', style: TextStyle(color: Colors.redAccent, fontSize: 13.6)),
-              onTap: () async {
-                Navigator.of(sheetContext).pop();
-                await _confirmDeleteProject(project);
-              },
-            ),
+            const SizedBox(height: 6),
+            // Group 1: Share project, Rename project, Project settings, Project home
+            _menuTile(Icons.ios_share_outlined, 'Share project', onTap: () {
+              Navigator.of(sheetContext).pop();
+              _shareProject(project);
+            }),
+            _menuTile(Icons.edit_outlined, 'Rename project', onTap: () async {
+              Navigator.of(sheetContext).pop();
+              await _promptRenameProject(project);
+            }),
+            _menuTile(Icons.tune_outlined, 'Project settings', onTap: () async {
+              Navigator.of(sheetContext).pop();
+              await _openProjectSettingsSheet(project);
+            }),
+            _menuTile(Icons.home_outlined, 'Project home', onTap: () {
+              Navigator.of(sheetContext).pop();
+              widget.onSelectProject(id);
+            }),
+            const Divider(color: Color(0xFF262626), height: 16, indent: 16, endIndent: 16),
+            // Group 2: Pin project, Delete project (merah)
+            _menuTile(pinned ? Icons.push_pin : Icons.push_pin_outlined, pinned ? 'Unpin project' : 'Pin project',
+                onTap: () {
+              Navigator.of(sheetContext).pop();
+              widget.onPinProject(id, !pinned);
+            }),
+            _menuTile(Icons.delete_outline, 'Delete project', color: _deleteRed, onTap: () async {
+              Navigator.of(sheetContext).pop();
+              await _confirmDeleteProject(project);
+            }),
             const SizedBox(height: 8),
           ],
         ),
       ),
     );
+  }
+
+  /// "Share project" — sama seperti share chat: belum ada backend
+  /// sharing/deep-link, jadi yang benar-benar terjadi adalah info project
+  /// (nama + deskripsi) disalin ke clipboard, bukan link URL palsu.
+  Future<void> _shareProject(Map<String, dynamic> project) async {
+    final name = (project['name'] as String?)?.trim().isNotEmpty == true ? project['name'] as String : 'Project';
+    final description = (project['description'] as String?)?.trim() ?? '';
+    final text = description.isEmpty ? 'JeonChat Project — $name' : 'JeonChat Project — $name\n\n$description';
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Info project disalin ke clipboard')),
+    );
+  }
+
+  Future<void> _openProjectSettingsSheet(Map<String, dynamic> project) async {
+    final id = project['id'] as String;
+    final nameController = TextEditingController(text: project['name'] as String? ?? '');
+    final descController = TextEditingController(text: project['description'] as String? ?? '');
+    String selectedColor = project['color'] as String? ?? _projectColors.first;
+    String selectedIcon = project['icon'] as String? ?? _projectIcons.keys.first;
+
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF171717),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, setSheetState) => Padding(
+          padding: EdgeInsets.only(
+            left: 16,
+            right: 16,
+            top: 16,
+            bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 16,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text('Project settings', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600, color: _ink)),
+                const SizedBox(height: 14),
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('Nama', style: TextStyle(fontSize: 11.5, color: _inkFaint, fontWeight: FontWeight.w600)),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: nameController,
+                  autofocus: true,
+                  style: const TextStyle(fontSize: 13.4, color: _ink),
+                  decoration: InputDecoration(
+                    filled: true,
+                    fillColor: const Color(0xFF262626),
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('Deskripsi', style: TextStyle(fontSize: 11.5, color: _inkFaint, fontWeight: FontWeight.w600)),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: descController,
+                  maxLines: 3,
+                  style: const TextStyle(fontSize: 13.4, color: _ink),
+                  decoration: InputDecoration(
+                    hintText: 'Opsional',
+                    hintStyle: const TextStyle(color: _inkFaint),
+                    filled: true,
+                    fillColor: const Color(0xFF262626),
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('Warna', style: TextStyle(fontSize: 11.5, color: _inkFaint, fontWeight: FontWeight.w600)),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: _projectColors.map((hex) {
+                    final color = _colorFromHex(hex);
+                    final selected = hex == selectedColor;
+                    return GestureDetector(
+                      onTap: () => setSheetState(() => selectedColor = hex),
+                      child: Container(
+                        width: 28,
+                        height: 28,
+                        decoration: BoxDecoration(
+                          color: color,
+                          shape: BoxShape.circle,
+                          border: selected ? Border.all(color: _ink, width: 2) : null,
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 16),
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('Ikon', style: TextStyle(fontSize: 11.5, color: _inkFaint, fontWeight: FontWeight.w600)),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: _projectIcons.entries.map((entry) {
+                    final selected = entry.key == selectedIcon;
+                    return GestureDetector(
+                      onTap: () => setSheetState(() => selectedIcon = entry.key),
+                      child: Container(
+                        width: 34,
+                        height: 34,
+                        decoration: BoxDecoration(
+                          color: selected ? _activeBg : const Color(0xFF262626),
+                          shape: BoxShape.circle,
+                          border: selected ? Border.all(color: _ink, width: 1.5) : null,
+                        ),
+                        alignment: Alignment.center,
+                        child: Icon(entry.value, size: 17, color: _ink),
+                      ),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 18),
+                SizedBox(
+                  height: 44,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.of(sheetContext).pop(true),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _ink,
+                      foregroundColor: Colors.black,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+                    ),
+                    child: const Text('Simpan', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final name = nameController.text.trim();
+    if (saved == true && name.isNotEmpty) {
+      await widget.onUpdateProjectSettings(
+        id,
+        name: name,
+        description: descController.text.trim(),
+        color: selectedColor,
+        icon: selectedIcon,
+      );
+    }
   }
 
   Future<void> _promptRenameProject(Map<String, dynamic> project) async {

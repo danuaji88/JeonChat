@@ -184,6 +184,22 @@ class _JeonChatScreenState extends State<JeonChatScreen> with SingleTickerProvid
     await _refreshProjects();
   }
 
+  Future<void> _updateProjectSettings(
+    String id, {
+    required String name,
+    required String description,
+    required String color,
+    required String icon,
+  }) async {
+    await ChatHistoryService.updateProjectSettings(id, name: name, description: description, color: color, icon: icon);
+    await _refreshProjects();
+  }
+
+  Future<void> _pinProject(String id, bool pinned) async {
+    await ChatHistoryService.pinProject(id, pinned);
+    await _refreshProjects();
+  }
+
   Future<void> _archiveProject(String id, bool archived) async {
     await ChatHistoryService.archiveProject(id, archived);
     if (_activeProjectId == id) setState(() => _activeProjectId = null);
@@ -379,7 +395,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> with SingleTickerProvid
     try {
       final reply = await widget.api.sendChat(
         history: _messages.where((m) => !m.text.startsWith('JeonAI Sedang') && !m.text.startsWith('⚠️')).toList(),
-        model: _selectedModel,
+        model: model,
       );
       setState(() {
         _messages = _messages.sublist(0, _messages.length - 1); // hapus typing
@@ -470,12 +486,12 @@ class _JeonChatScreenState extends State<JeonChatScreen> with SingleTickerProvid
         _messages = [..._messages, _buildAgentMessage(result.content)];
       });
       _saveHistory();
-    } on AgentTimeoutException catch (e) {
+    } on AgentTimeoutException {
       // Agent timeout — auto-fallback ke /chat
       try {
         final reply = await widget.api.sendChat(
           history: _messages.where((m) => !m.text.startsWith('JeonAI Sedang') && !m.text.startsWith('⚠️')).toList(),
-          model: _selectedModel,
+          model: model,
         );
         setState(() {
           _messages = _messages.sublist(0, _messages.length - 1);
@@ -644,6 +660,8 @@ class _JeonChatScreenState extends State<JeonChatScreen> with SingleTickerProvid
       onSelectProject: _selectProject,
       onCreateProject: _createProject,
       onRenameProject: _renameProject,
+      onUpdateProjectSettings: _updateProjectSettings,
+      onPinProject: _pinProject,
       onArchiveProject: _archiveProject,
       onDeleteProject: _deleteProject,
       onClearHistory: _clearAllHistory,
