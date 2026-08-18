@@ -35,6 +35,10 @@ class _JeonChatScreenState extends State<JeonChatScreen> with SingleTickerProvid
   bool? _sidebarOpenOverride; // null = pakai default responsif (terbuka di web/desktop)
   double _messagesOpacity = 1.0; // fade 150ms saat pindah conversation
 
+  // ---- Projects ----
+  List<Map<String, dynamic>> _projects = [];
+  String? _activeProjectId;
+
   late final AnimationController _pulseController;
 
   // Deteksi file yang disebut agent (mis. "disimpan di /tmp/xxx.jpg") agar
@@ -135,6 +139,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> with SingleTickerProvid
   /// Load daftar semua percakapan lalu buka yang paling baru — bikin satu
   /// percakapan kosong kalau belum ada sama sekali.
   Future<void> _loadConversations() async {
+    final projects = await ChatHistoryService.listProjects();
     final list = await ChatHistoryService.listConversations();
     if (!mounted) return;
     if (list.isEmpty) {
@@ -142,6 +147,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> with SingleTickerProvid
       final refreshed = await ChatHistoryService.listConversations();
       if (!mounted) return;
       setState(() {
+        _projects = projects;
         _conversations = refreshed;
         _conversationId = id;
         _messages = [];
@@ -153,12 +159,53 @@ class _JeonChatScreenState extends State<JeonChatScreen> with SingleTickerProvid
     final active = await ChatHistoryService.loadConversation(activeId);
     if (!mounted) return;
     setState(() {
+      _projects = projects;
       _conversations = list;
       _conversationId = activeId;
       _messages = _messagesFromConversation(active);
       _agentSession = active?['agentSession'] as String?;
     });
     _scrollToBottom();
+  }
+
+  Future<void> _refreshProjects() async {
+    final projects = await ChatHistoryService.listProjects();
+    if (!mounted) return;
+    setState(() => _projects = projects);
+  }
+
+  Future<void> _createProject(String name, String color, String icon) async {
+    await ChatHistoryService.createProject(name: name, color: color, icon: icon);
+    await _refreshProjects();
+  }
+
+  Future<void> _renameProject(String id, String name) async {
+    await ChatHistoryService.renameProject(id, name);
+    await _refreshProjects();
+  }
+
+  Future<void> _archiveProject(String id, bool archived) async {
+    await ChatHistoryService.archiveProject(id, archived);
+    if (_activeProjectId == id) setState(() => _activeProjectId = null);
+    await _refreshProjects();
+  }
+
+  Future<void> _deleteProject(String id) async {
+    await ChatHistoryService.deleteProject(id);
+    if (_activeProjectId == id) setState(() => _activeProjectId = null);
+    await _refreshProjects();
+    final list = await ChatHistoryService.listConversations();
+    if (!mounted) return;
+    setState(() => _conversations = list);
+  }
+
+  void _selectProject(String? id) => setState(() => _activeProjectId = id);
+
+  Future<void> _moveToProject(String conversationId, String? projectId) async {
+    await ChatHistoryService.setConversationProject(conversationId, projectId);
+    final list = await ChatHistoryService.listConversations();
+    if (!mounted) return;
+    setState(() => _conversations = list);
   }
 
   /// Dipanggil di setiap titik yang tadinya panggil "_saveHistory()" —
@@ -182,7 +229,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> with SingleTickerProvid
   }
 
   Future<void> _newChat() async {
-    final id = await ChatHistoryService.createConversation();
+    final id = await ChatHistoryService.createConversation(projectId: _activeProjectId);
     final list = await ChatHistoryService.listConversations();
     if (!mounted) return;
     setState(() {
@@ -218,6 +265,13 @@ class _JeonChatScreenState extends State<JeonChatScreen> with SingleTickerProvid
 
   Future<void> _togglePinConversation(String id, bool pinned) async {
     await ChatHistoryService.pinConversation(id, pinned);
+    final list = await ChatHistoryService.listConversations();
+    if (!mounted) return;
+    setState(() => _conversations = list);
+  }
+
+  Future<void> _toggleArchiveConversation(String id, bool archived) async {
+    await ChatHistoryService.archiveConversation(id, archived);
     final list = await ChatHistoryService.listConversations();
     if (!mounted) return;
     setState(() => _conversations = list);
@@ -575,7 +629,9 @@ class _JeonChatScreenState extends State<JeonChatScreen> with SingleTickerProvid
       },
       onRenameConversation: _renameConversation,
       onTogglePin: _togglePinConversation,
+      onToggleArchive: _toggleArchiveConversation,
       onDeleteConversation: _deleteConversationById,
+      onMoveToProject: _moveToProject,
       onClose: () {
         if (isWide) {
           setState(() => _sidebarOpenOverride = false);
@@ -583,6 +639,13 @@ class _JeonChatScreenState extends State<JeonChatScreen> with SingleTickerProvid
           Navigator.of(context).maybePop();
         }
       },
+      projects: _projects,
+      activeProjectId: _activeProjectId,
+      onSelectProject: _selectProject,
+      onCreateProject: _createProject,
+      onRenameProject: _renameProject,
+      onArchiveProject: _archiveProject,
+      onDeleteProject: _deleteProject,
       onClearHistory: _clearAllHistory,
       onProfileChanged: () => setState(() {}),
     );

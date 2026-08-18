@@ -9,6 +9,7 @@ import '../models/message.dart';
 /// endpoint /chat/history yang berfungsi (dicek, hasilnya 404).
 class ChatHistoryService {
   static const _conversationsKey = 'jeon_chat_conversations';
+  static const _projectsKey = 'jeon_chat_projects';
 
   // Key skema lama (satu daftar pesan flat) — dipertahankan hanya untuk
   // migrasi satu-kali ke conversation pertama, lalu dihapus.
@@ -93,7 +94,7 @@ class ChatHistoryService {
     return null;
   }
 
-  static Future<String> createConversation() async {
+  static Future<String> createConversation({String? projectId}) async {
     final prefs = await SharedPreferences.getInstance();
     final list = await _readConversations(prefs);
     final now = DateTime.now().millisecondsSinceEpoch;
@@ -103,9 +104,11 @@ class ChatHistoryService {
       'title': 'Percakapan Baru',
       'messages': <Map<String, dynamic>>[],
       'pinned': false,
+      'archived': false,
       'createdAt': now,
       'updatedAt': now,
       'agentSession': null,
+      'projectId': projectId,
     });
     await _writeConversations(prefs, list);
     return id;
@@ -131,15 +134,27 @@ class ChatHistoryService {
       'title': resolvedTitle,
       'messages': messages.map((m) => m.toJson()).toList(),
       'pinned': existing?['pinned'] ?? false,
+      'archived': existing?['archived'] ?? false,
       'createdAt': existing?['createdAt'] ?? now,
       'updatedAt': now,
       'agentSession': agentSession ?? existing?['agentSession'],
+      'projectId': existing?['projectId'],
     };
     if (idx != -1) {
       list[idx] = updated;
     } else {
       list.insert(0, updated);
     }
+    await _writeConversations(prefs, list);
+  }
+
+  /// Pindahkan sebuah conversation ke project [projectId] (null = lepas dari project).
+  static Future<void> setConversationProject(String id, String? projectId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = await _readConversations(prefs);
+    final idx = list.indexWhere((c) => c['id'] == id);
+    if (idx == -1) return;
+    list[idx] = {...list[idx], 'projectId': projectId};
     await _writeConversations(prefs, list);
   }
 
@@ -168,6 +183,15 @@ class ChatHistoryService {
     await _writeConversations(prefs, list);
   }
 
+  static Future<void> archiveConversation(String id, bool archived) async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = await _readConversations(prefs);
+    final idx = list.indexWhere((c) => c['id'] == id);
+    if (idx == -1) return;
+    list[idx] = {...list[idx], 'archived': archived};
+    await _writeConversations(prefs, list);
+  }
+
   /// Judul otomatis dari pesan pertama user, dipotong maksimal 40 karakter.
   static Future<String> autoTitle(List<ChatMessage> messages) async {
     final firstUser = messages.where((m) => m.isUser).toList();
@@ -175,5 +199,130 @@ class ChatHistoryService {
     final text = firstUser.first.text.trim();
     if (text.isEmpty) return 'Percakapan Baru';
     return text.length > 40 ? '${text.substring(0, 40)}…' : text;
+  }
+
+  // ---- Projects ----
+  // {id, name, description, color, icon, pinned, archived, createdAt}
+
+  static Future<List<Map<String, dynamic>>> _readProjects(SharedPreferences prefs) async {
+    final raw = prefs.getString(_projectsKey);
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      final decoded = jsonDecode(raw) as List;
+      return decoded.whereType<Map<String, dynamic>>().toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<void> _writeProjects(SharedPreferences prefs, List<Map<String, dynamic>> list) async {
+    await prefs.setString(_projectsKey, jsonEncode(list));
+  }
+
+  /// Semua project (default: yang belum di-archive), urut: pinned dulu,
+  /// lalu dari yang paling lama dibuat.
+  static Future<List<Map<String, dynamic>>> listProjects({bool includeArchived = false}) async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = await _readProjects(prefs);
+    final filtered = includeArchived ? list : list.where((p) => p['archived'] != true).toList();
+    filtered.sort((a, b) {
+      final pinnedA = a['pinned'] == true;
+      final pinnedB = b['pinned'] == true;
+      if (pinnedA != pinnedB) return pinnedA ? -1 : 1;
+      return (a['createdAt'] as int? ?? 0).compareTo(b['createdAt'] as int? ?? 0);
+    });
+    return filtered;
+  }
+
+  static Future<String> createProject({
+    required String name,
+    required String color,
+    required String icon,
+    String description = '',
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = await _readProjects(prefs);
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final id = 'proj_${now}_${list.length}';
+    list.add({
+      'id': id,
+      'name': name,
+      'description': description,
+      'color': color,
+      'icon': icon,
+      'pinned': false,
+      'archived': false,
+      'createdAt': now,
+    });
+    await _writeProjects(prefs, list);
+    return id;
+  }
+
+  static Future<void> renameProject(String id, String name) async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = await _readProjects(prefs);
+    final idx = list.indexWhere((p) => p['id'] == id);
+    if (idx == -1) return;
+    list[idx] = {...list[idx], 'name': name};
+    await _writeProjects(prefs, list);
+  }
+
+  /// Update lengkap dari halaman "Project settings" — nama, deskripsi, warna, ikon.
+  static Future<void> updateProjectSettings(
+    String id, {
+    required String name,
+    required String description,
+    required String color,
+    required String icon,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = await _readProjects(prefs);
+    final idx = list.indexWhere((p) => p['id'] == id);
+    if (idx == -1) return;
+    list[idx] = {
+      ...list[idx],
+      'name': name,
+      'description': description,
+      'color': color,
+      'icon': icon,
+    };
+    await _writeProjects(prefs, list);
+  }
+
+  static Future<void> pinProject(String id, bool pinned) async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = await _readProjects(prefs);
+    final idx = list.indexWhere((p) => p['id'] == id);
+    if (idx == -1) return;
+    list[idx] = {...list[idx], 'pinned': pinned};
+    await _writeProjects(prefs, list);
+  }
+
+  static Future<void> archiveProject(String id, bool archived) async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = await _readProjects(prefs);
+    final idx = list.indexWhere((p) => p['id'] == id);
+    if (idx == -1) return;
+    list[idx] = {...list[idx], 'archived': archived};
+    await _writeProjects(prefs, list);
+  }
+
+  /// Hapus project — chat yang tadinya masuk situ dilepas (projectId jadi null),
+  /// bukan ikut terhapus.
+  static Future<void> deleteProject(String id) async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = await _readProjects(prefs);
+    list.removeWhere((p) => p['id'] == id);
+    await _writeProjects(prefs, list);
+
+    final conversations = await _readConversations(prefs);
+    var changed = false;
+    for (var i = 0; i < conversations.length; i++) {
+      if (conversations[i]['projectId'] == id) {
+        conversations[i] = {...conversations[i], 'projectId': null};
+        changed = true;
+      }
+    }
+    if (changed) await _writeConversations(prefs, conversations);
   }
 }

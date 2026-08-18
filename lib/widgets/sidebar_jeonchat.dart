@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 
 import '../services/api_service.dart';
 import '../services/profile_service.dart';
@@ -15,10 +16,21 @@ class JeonChatSidebar extends StatefulWidget {
   final ValueChanged<String> onSelectConversation;
   final void Function(String id, String title) onRenameConversation;
   final void Function(String id, bool pinned) onTogglePin;
+  final void Function(String id, bool archived) onToggleArchive;
   final ValueChanged<String> onDeleteConversation;
+  final void Function(String conversationId, String? projectId) onMoveToProject;
   final VoidCallback onClose;
   final VoidCallback? onClearHistory;
   final VoidCallback? onProfileChanged;
+
+  // ---- Projects ----
+  final List<Map<String, dynamic>> projects;
+  final String? activeProjectId;
+  final ValueChanged<String?> onSelectProject;
+  final Future<void> Function(String name, String color, String icon) onCreateProject;
+  final void Function(String id, String name) onRenameProject;
+  final void Function(String id, bool archived) onArchiveProject;
+  final ValueChanged<String> onDeleteProject;
 
   const JeonChatSidebar({
     super.key,
@@ -30,8 +42,17 @@ class JeonChatSidebar extends StatefulWidget {
     required this.onSelectConversation,
     required this.onRenameConversation,
     required this.onTogglePin,
+    required this.onToggleArchive,
     required this.onDeleteConversation,
+    required this.onMoveToProject,
     required this.onClose,
+    required this.projects,
+    required this.activeProjectId,
+    required this.onSelectProject,
+    required this.onCreateProject,
+    required this.onRenameProject,
+    required this.onArchiveProject,
+    required this.onDeleteProject,
     this.onClearHistory,
     this.onProfileChanged,
   });
@@ -53,7 +74,25 @@ class _JeonChatSidebarState extends State<JeonChatSidebar> {
   final _searchController = TextEditingController();
   String _query = '';
   bool _workMode = false;
-  bool _projectsExpanded = false;
+  bool _projectsExpanded = true;
+  bool _archiveExpanded = false;
+
+  static const _projectColors = <String>[
+    '#58A6FF', '#3FB950', '#DB6D28', '#DB61A2', '#A371F7', '#39C5CF', '#F85149', '#D29922',
+  ];
+  static const _projectIcons = <String, IconData>{
+    'folder': Icons.folder,
+    'work': Icons.work_outline,
+    'star': Icons.star_outline,
+    'science': Icons.science_outlined,
+    'code': Icons.code,
+    'palette': Icons.palette_outlined,
+    'rocket': Icons.rocket_launch_outlined,
+    'book': Icons.menu_book_outlined,
+  };
+
+  Color _colorFromHex(String hex) => Color(int.parse(hex.replaceFirst('#', '0xFF')));
+  IconData _iconFromKey(String key) => _projectIcons[key] ?? Icons.folder;
 
   @override
   void dispose() {
@@ -64,13 +103,18 @@ class _JeonChatSidebarState extends State<JeonChatSidebar> {
   @override
   Widget build(BuildContext context) {
     final query = _query.trim().toLowerCase();
-    final filtered = query.isEmpty
+    var filtered = query.isEmpty
         ? widget.conversations
         : widget.conversations
             .where((c) => (c['title'] as String? ?? '').toLowerCase().contains(query))
             .toList();
-    final pinned = filtered.where((c) => c['pinned'] == true).toList();
-    final others = filtered.where((c) => c['pinned'] != true).toList();
+    if (widget.activeProjectId != null) {
+      filtered = filtered.where((c) => c['projectId'] == widget.activeProjectId).toList();
+    }
+    final archivedList = filtered.where((c) => c['archived'] == true).toList();
+    final visible = filtered.where((c) => c['archived'] != true).toList();
+    final pinned = visible.where((c) => c['pinned'] == true).toList();
+    final others = visible.where((c) => c['pinned'] != true).toList();
 
     return Container(
       color: _bg,
@@ -108,6 +152,7 @@ class _JeonChatSidebarState extends State<JeonChatSidebar> {
                   )
                 else
                   ...others.map(_conversationRow),
+                if (archivedList.isNotEmpty) _archivedSection(archivedList),
               ],
             ),
           ),
@@ -253,33 +298,334 @@ class _JeonChatSidebarState extends State<JeonChatSidebar> {
   Widget _projectsSection() => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          InkWell(
-            onTap: () => setState(() => _projectsExpanded = !_projectsExpanded),
-            hoverColor: _hoverBg,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 12, 6),
-              child: Row(
-                children: [
-                  const Icon(Icons.folder_outlined, size: 15, color: _inkFaint),
-                  const SizedBox(width: 8),
-                  const Expanded(
-                    child: Text('Projects',
-                        style:
-                            TextStyle(fontSize: 11, color: _inkFaint, fontWeight: FontWeight.w600)),
+          Row(
+            children: [
+              Expanded(
+                child: InkWell(
+                  onTap: () => setState(() => _projectsExpanded = !_projectsExpanded),
+                  hoverColor: _hoverBg,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 4, 6),
+                    child: Row(
+                      children: [
+                        Icon(_projectsExpanded ? Icons.expand_more : Icons.chevron_right,
+                            size: 18, color: _inkFaint),
+                        const SizedBox(width: 4),
+                        const Text('Projects',
+                            style: TextStyle(fontSize: 11, color: _inkFaint, fontWeight: FontWeight.w600)),
+                      ],
+                    ),
                   ),
-                  Icon(_projectsExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
-                      size: 16, color: _inkFaint),
-                ],
+                ),
               ),
-            ),
+              InkWell(
+                borderRadius: BorderRadius.circular(6),
+                onTap: _createProjectDialog,
+                child: const Padding(
+                  padding: EdgeInsets.fromLTRB(4, 10, 12, 6),
+                  child: Icon(Icons.add, size: 16, color: _inkFaint),
+                ),
+              ),
+            ],
           ),
           if (_projectsExpanded)
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
-              child: Text('Belum ada project', style: TextStyle(fontSize: 11.5, color: _inkFaint)),
-            ),
+            widget.projects.isEmpty
+                ? const Padding(
+                    padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
+                    child: Text('Belum ada project', style: TextStyle(fontSize: 11.5, color: _inkFaint)),
+                  )
+                : Column(children: widget.projects.map(_projectRow).toList()),
         ],
       );
+
+  Widget _projectRow(Map<String, dynamic> project) {
+    final id = project['id'] as String;
+    final name = (project['name'] as String?)?.trim().isNotEmpty == true ? project['name'] as String : 'Project';
+    final color = _colorFromHex(project['color'] as String? ?? '#58A6FF');
+    final icon = _iconFromKey(project['icon'] as String? ?? 'folder');
+    final active = id == widget.activeProjectId;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+      decoration: BoxDecoration(
+        color: active ? _activeBg : null,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        hoverColor: active ? _activeBg : _hoverBg,
+        onTap: () => widget.onSelectProject(active ? null : id),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+          child: Row(
+            children: [
+              Icon(icon, size: 14, color: color),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Text(name,
+                    maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13, color: _ink)),
+              ),
+              InkWell(
+                borderRadius: BorderRadius.circular(6),
+                onTap: () => _openProjectMenu(project),
+                child: const Padding(
+                  padding: EdgeInsets.all(4),
+                  child: Icon(Icons.more_horiz, size: 16, color: _inkMuted),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openProjectMenu(Map<String, dynamic> project) async {
+    final id = project['id'] as String;
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF171717),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 10),
+            Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+            ),
+            const SizedBox(height: 10),
+            ListTile(
+              leading: const Icon(Icons.edit_outlined, color: _ink, size: 19),
+              title: const Text('Rename', style: TextStyle(color: _ink, fontSize: 13.6)),
+              onTap: () async {
+                Navigator.of(sheetContext).pop();
+                await _promptRenameProject(project);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.archive_outlined, color: _ink, size: 19),
+              title: const Text('Archive', style: TextStyle(color: _ink, fontSize: 13.6)),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                widget.onArchiveProject(id, true);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 19),
+              title: const Text('Delete', style: TextStyle(color: Colors.redAccent, fontSize: 13.6)),
+              onTap: () async {
+                Navigator.of(sheetContext).pop();
+                await _confirmDeleteProject(project);
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _promptRenameProject(Map<String, dynamic> project) async {
+    final controller = TextEditingController(text: project['name'] as String? ?? '');
+    final newName = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF171717),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+      builder: (sheetContext) => Padding(
+        padding: EdgeInsets.only(
+          left: 16,
+          right: 16,
+          top: 16,
+          bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 16,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text('Ganti nama project', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600, color: _ink)),
+            const SizedBox(height: 10),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              style: const TextStyle(fontSize: 13.4, color: _ink),
+              decoration: InputDecoration(
+                filled: true,
+                fillColor: const Color(0xFF262626),
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+              ),
+              onSubmitted: (v) => Navigator.of(sheetContext).pop(v),
+            ),
+            const SizedBox(height: 14),
+            SizedBox(
+              height: 44,
+              child: ElevatedButton(
+                onPressed: () => Navigator.of(sheetContext).pop(controller.text.trim()),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _ink,
+                  foregroundColor: Colors.black,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+                ),
+                child: const Text('Simpan', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (newName != null && newName.trim().isNotEmpty) {
+      widget.onRenameProject(project['id'] as String, newName.trim());
+    }
+  }
+
+  Future<void> _confirmDeleteProject(Map<String, dynamic> project) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF171717),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: const Text('Hapus project ini?', style: TextStyle(color: _ink, fontSize: 15.5)),
+        content: Text(
+            '"${project['name'] ?? 'Project ini'}" akan dihapus. Chat di dalamnya tidak ikut terhapus, cuma dilepas dari project.',
+            style: const TextStyle(color: _inkMuted, fontSize: 12.8)),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Batal', style: TextStyle(color: _inkMuted))),
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Hapus', style: TextStyle(color: Colors.redAccent))),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      widget.onDeleteProject(project['id'] as String);
+      if (widget.activeProjectId == project['id']) widget.onSelectProject(null);
+    }
+  }
+
+  Future<void> _createProjectDialog() async {
+    final controller = TextEditingController();
+    String selectedColor = _projectColors.first;
+    String selectedIcon = _projectIcons.keys.first;
+
+    final created = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF171717),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, setSheetState) => Padding(
+          padding: EdgeInsets.only(
+            left: 16,
+            right: 16,
+            top: 16,
+            bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 16,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text('Project baru', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600, color: _ink)),
+              const SizedBox(height: 10),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                style: const TextStyle(fontSize: 13.4, color: _ink),
+                decoration: InputDecoration(
+                  hintText: 'Nama project',
+                  hintStyle: const TextStyle(color: _inkFaint),
+                  filled: true,
+                  fillColor: const Color(0xFF262626),
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text('Warna', style: TextStyle(fontSize: 11.5, color: _inkFaint, fontWeight: FontWeight.w600)),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: _projectColors.map((hex) {
+                  final color = _colorFromHex(hex);
+                  final selected = hex == selectedColor;
+                  return GestureDetector(
+                    onTap: () => setSheetState(() => selectedColor = hex),
+                    child: Container(
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        color: color,
+                        shape: BoxShape.circle,
+                        border: selected ? Border.all(color: _ink, width: 2) : null,
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 16),
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text('Ikon', style: TextStyle(fontSize: 11.5, color: _inkFaint, fontWeight: FontWeight.w600)),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: _projectIcons.entries.map((entry) {
+                  final selected = entry.key == selectedIcon;
+                  return GestureDetector(
+                    onTap: () => setSheetState(() => selectedIcon = entry.key),
+                    child: Container(
+                      width: 34,
+                      height: 34,
+                      decoration: BoxDecoration(
+                        color: selected ? _activeBg : const Color(0xFF262626),
+                        shape: BoxShape.circle,
+                        border: selected ? Border.all(color: _ink, width: 1.5) : null,
+                      ),
+                      alignment: Alignment.center,
+                      child: Icon(entry.value, size: 17, color: _ink),
+                    ),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 18),
+              SizedBox(
+                height: 44,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.of(sheetContext).pop(true),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _ink,
+                    foregroundColor: Colors.black,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+                  ),
+                  child: const Text('Buat Project', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    final name = controller.text.trim();
+    if (created == true && name.isNotEmpty) {
+      await widget.onCreateProject(name, selectedColor, selectedIcon);
+    }
+  }
 
   Widget _sectionLabel(String text) => Padding(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
@@ -331,9 +677,125 @@ class _JeonChatSidebarState extends State<JeonChatSidebar> {
     );
   }
 
+  Widget _archivedSection(List<Map<String, dynamic>> archived) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            onTap: () => setState(() => _archiveExpanded = !_archiveExpanded),
+            hoverColor: _hoverBg,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+              child: Row(
+                children: [
+                  const Icon(Icons.archive_outlined, size: 13, color: _inkFaint),
+                  const SizedBox(width: 7),
+                  Expanded(
+                    child: Text('ARCHIVED (${archived.length})',
+                        style: const TextStyle(
+                            fontSize: 11, letterSpacing: 0.4, color: _inkFaint, fontWeight: FontWeight.w600)),
+                  ),
+                  Icon(_archiveExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                      size: 15, color: _inkFaint),
+                ],
+              ),
+            ),
+          ),
+          if (_archiveExpanded) ...archived.map(_conversationRow),
+        ],
+      );
+
+  static const _deleteRed = Color(0xFFEF5350);
+
   Future<void> _openConversationMenu(Map<String, dynamic> conv) async {
     final id = conv['id'] as String;
     final pinned = conv['pinned'] == true;
+    final archived = conv['archived'] == true;
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF171717),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 10),
+            Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+            ),
+            const SizedBox(height: 6),
+            // Group 1: Share, Rename
+            _menuTile(Icons.ios_share_outlined, 'Share', onTap: () {
+              Navigator.of(sheetContext).pop();
+              _shareConversation(conv);
+            }),
+            _menuTile(Icons.edit_outlined, 'Rename', onTap: () async {
+              Navigator.of(sheetContext).pop();
+              await _promptRename(conv);
+            }),
+            const Divider(color: Color(0xFF262626), height: 16, indent: 16, endIndent: 16),
+            // Group 2: Pin chat, Archive, Delete (merah)
+            _menuTile(pinned ? Icons.push_pin : Icons.push_pin_outlined, pinned ? 'Unpin chat' : 'Pin chat',
+                onTap: () {
+              Navigator.of(sheetContext).pop();
+              widget.onTogglePin(id, !pinned);
+            }),
+            _menuTile(archived ? Icons.unarchive_outlined : Icons.archive_outlined,
+                archived ? 'Unarchive' : 'Archive', onTap: () {
+              Navigator.of(sheetContext).pop();
+              widget.onToggleArchive(id, !archived);
+            }),
+            _menuTile(Icons.delete_outline, 'Delete', color: _deleteRed, onTap: () async {
+              Navigator.of(sheetContext).pop();
+              await _confirmDelete(conv);
+            }),
+            const Divider(color: Color(0xFF262626), height: 16, indent: 16, endIndent: 16),
+            // Group 3: Move to project
+            _menuTile(Icons.drive_file_move_outline, 'Move to project',
+                trailing: Icons.chevron_right, onTap: () async {
+              Navigator.of(sheetContext).pop();
+              await _promptMoveToProject(conv);
+            }),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _menuTile(IconData icon, String label, {VoidCallback? onTap, Color? color, IconData? trailing}) {
+    final c = color ?? _ink;
+    return ListTile(
+      onTap: onTap,
+      leading: Icon(icon, size: 19, color: c),
+      title: Text(label, style: TextStyle(color: c, fontSize: 13.6)),
+      trailing: trailing != null ? Icon(trailing, size: 17, color: _inkFaint) : null,
+    );
+  }
+
+  /// "Share" — belum ada backend sharing/deep-link, jadi yang benar-benar
+  /// terjadi: transkrip percakapan disalin ke clipboard (nyata, bukan
+  /// tombol mati), bukan link URL palsu yang kalau dibuka tidak ke mana-mana.
+  Future<void> _shareConversation(Map<String, dynamic> conv) async {
+    final title = (conv['title'] as String?)?.trim().isNotEmpty == true ? conv['title'] as String : 'Percakapan';
+    final rawMessages = conv['messages'];
+    final messages = rawMessages is List ? rawMessages.whereType<Map<String, dynamic>>() : const <Map<String, dynamic>>[];
+    final transcript = messages.map((m) {
+      final isUser = m['isUser'] == true;
+      final text = (m['text'] ?? '').toString();
+      return '${isUser ? 'User' : 'AI'}: $text';
+    }).join('\n\n');
+    final shareText = transcript.isEmpty ? 'JeonChat — $title' : 'JeonChat — $title\n\n$transcript';
+    await Clipboard.setData(ClipboardData(text: shareText));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Transkrip chat disalin ke clipboard')),
+    );
+  }
+
+  Future<void> _promptMoveToProject(Map<String, dynamic> conv) async {
+    final currentProjectId = conv['projectId'] as String?;
     await showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF171717),
@@ -349,30 +811,38 @@ class _JeonChatSidebarState extends State<JeonChatSidebar> {
               decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
             ),
             const SizedBox(height: 10),
-            ListTile(
-              leading: const Icon(Icons.edit_outlined, color: _ink, size: 19),
-              title: const Text('Rename', style: TextStyle(color: _ink, fontSize: 13.6)),
-              onTap: () async {
-                Navigator.of(sheetContext).pop();
-                await _promptRename(conv);
-              },
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text('Pindahkan ke project',
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: _inkMuted)),
+              ),
             ),
             ListTile(
-              leading: Icon(pinned ? Icons.push_pin : Icons.push_pin_outlined, color: _ink, size: 19),
-              title: Text(pinned ? 'Unpin' : 'Pin', style: const TextStyle(color: _ink, fontSize: 13.6)),
+              leading: Icon(Icons.close, color: _inkMuted, size: 19),
+              title: const Text('Tanpa project', style: TextStyle(color: _ink, fontSize: 13.6)),
+              trailing: currentProjectId == null ? const Icon(Icons.check, color: _ink, size: 18) : null,
               onTap: () {
                 Navigator.of(sheetContext).pop();
-                widget.onTogglePin(id, !pinned);
+                widget.onMoveToProject(conv['id'] as String, null);
               },
             ),
-            ListTile(
-              leading: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 19),
-              title: const Text('Delete', style: TextStyle(color: Colors.redAccent, fontSize: 13.6)),
-              onTap: () async {
-                Navigator.of(sheetContext).pop();
-                await _confirmDelete(conv);
-              },
-            ),
+            ...widget.projects.map((p) {
+              final id = p['id'] as String;
+              final name = (p['name'] as String?)?.trim().isNotEmpty == true ? p['name'] as String : 'Project';
+              final color = _colorFromHex(p['color'] as String? ?? '#58A6FF');
+              final icon = _iconFromKey(p['icon'] as String? ?? 'folder');
+              return ListTile(
+                leading: Icon(icon, color: color, size: 19),
+                title: Text(name, style: const TextStyle(color: _ink, fontSize: 13.6)),
+                trailing: id == currentProjectId ? const Icon(Icons.check, color: _ink, size: 18) : null,
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  widget.onMoveToProject(conv['id'] as String, id);
+                },
+              );
+            }),
             const SizedBox(height: 8),
           ],
         ),
