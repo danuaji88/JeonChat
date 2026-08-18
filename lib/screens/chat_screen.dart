@@ -141,7 +141,6 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       _guestMessageCount++;
     });
     _controller.clear();
-    // Simpan SEGERA setelah user message — walau request gagal, pesan user tetap tersimpan
     _saveHistory();
     _scrollToBottom();
 
@@ -158,13 +157,26 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       });
       _saveHistory();
     } on AgentTimeoutException catch (e) {
-      setState(() {
-        _messages = [
-          ..._messages,
-          ChatMessage(isUser: false, text: '⏳ ${e.toString()}'),
-        ];
-      });
-      _saveHistory();
+      // Agent timeout (request berat, mis. video/gambar) — auto-fallback ke
+      // /chat biasa alih-alih cuma menampilkan "masih bekerja" lalu berhenti.
+      try {
+        final reply = await widget.api.sendChat(
+          history: _messages,
+          model: 'jeon-chat',
+        );
+        setState(() {
+          _messages = [..._messages, ChatMessage(isUser: false, text: reply)];
+        });
+        _saveHistory();
+      } catch (e2) {
+        setState(() {
+          _messages = [
+            ..._messages,
+            ChatMessage(isUser: false, text: '⏳ ${e.toString()}'),
+          ];
+        });
+        _saveHistory();
+      }
     } catch (e) {
       // Fallback ke /chat kalau /agent gagal
       try {
@@ -425,6 +437,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                 Expanded(
                   child: TextField(
                     controller: _controller,
+                    minLines: 1,
                     maxLines: 1,
                     textInputAction: TextInputAction.send,
                     style: const TextStyle(fontSize: 13.4, color: JeonColors.ink),

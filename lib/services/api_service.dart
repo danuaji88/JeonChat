@@ -225,8 +225,8 @@ class ApiService {
       throw ApiException('Agent submit: task_id tidak ditemukan');
     }
 
-    // Poll setiap 5 detik, max 60 detik
-    for (int i = 0; i < 12; i++) {
+    // Poll setiap 5 detik, max 180 detik (agent berat butuh waktu)
+    for (int i = 0; i < 36; i++) {
       await Future.delayed(const Duration(seconds: 5));
       final pollRes = await http
           .post(_uri('/agent/poll'), headers: _headers, body: jsonEncode({'task_id': taskId}))
