@@ -111,9 +111,10 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     setState(() {
       _messages = [..._messages, ChatMessage(isUser: true, text: text)];
       _sending = true;
+      // Tampilkan indikator "sedang bekerja" segera
+      _messages = [..._messages, ChatMessage(isUser: false, text: '⏳ AI sedang bekerja...')];
     });
     _controller.clear();
-    // Simpan SEGERA setelah user message — walau request gagal, pesan user tetap tersimpan
     _saveHistory();
     _scrollToBottom();
 
@@ -126,19 +127,46 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
         _agentSession = result.agentSession;
       }
       setState(() {
+        // Hapus pesan "sedang bekerja", ganti dengan hasil
+        _messages = _messages.sublist(0, _messages.length - 1);
         _messages = [..._messages, ChatMessage(isUser: false, text: result.content)];
       });
       _saveHistory();
     } on AgentTimeoutException catch (e) {
       setState(() {
+        _messages = _messages.sublist(0, _messages.length - 1);
         _messages = [
           ..._messages,
-          ChatMessage(isUser: false, text: '⏳ ${e.toString()}'),
+          ChatMessage(isUser: false, text: '⏳ ${e.toString()}\n\nMencoba dengan mode chat biasa...'),
         ];
       });
       _saveHistory();
+      // Fallback ke /chat
+      try {
+        final reply = await widget.api.sendChat(
+          history: _messages.where((m) => !m.text.startsWith('⏳')).toList(),
+          model: 'jeon-chat',
+        );
+        setState(() {
+          _messages = _messages.sublist(0, _messages.length - 1);
+          _messages = [..._messages, ChatMessage(isUser: false, text: reply)];
+        });
+        _saveHistory();
+      } catch (e2) {
+        setState(() {
+          _messages = _messages.sublist(0, _messages.length - 1);
+          _messages = [
+            ..._messages,
+            ChatMessage(isUser: false, text: '⚠️ Maaf Appa, request terlalu berat. Coba pertanyaan yang lebih singkat.'),
+          ];
+        });
+        _saveHistory();
+      }
     } catch (e) {
       // Fallback ke /chat kalau /agent gagal
+      setState(() {
+        _messages = _messages.sublist(0, _messages.length - 1);
+      });
       try {
         final reply = await widget.api.sendChat(
           history: _messages,
