@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/message.dart';
 import '../theme.dart';
+import 'audio_message_player.dart';
 import 'tool_card.dart';
 
 class ChatBubble extends StatelessWidget {
@@ -54,9 +55,9 @@ class ChatBubble extends StatelessWidget {
         constraints: const BoxConstraints(maxWidth: 520),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
         decoration: BoxDecoration(
-          color: isUser ? JeonColors.accent.withOpacity(0.15) : JeonColors.surface2,
+          color: isUser ? JeonColors.accent.withValues(alpha: 0.15) : JeonColors.surface2,
           border: Border.all(
-            color: isUser ? JeonColors.accent.withOpacity(0.3) : JeonColors.borderSoft,
+            color: isUser ? JeonColors.accent.withValues(alpha: 0.3) : JeonColors.borderSoft,
           ),
           borderRadius: BorderRadius.only(
             topLeft: const Radius.circular(JeonRadius.bubble),
@@ -81,6 +82,9 @@ class ChatBubble extends StatelessWidget {
               ),
             ),
             if (message.toolCall != null) ToolCardWidget(toolCall: message.toolCall!),
+            if (message.imageUrl != null) _imagePreview(message.imageUrl!),
+            if (message.audioUrl != null) AudioMessagePlayer(url: message.audioUrl!),
+            if (message.filePath != null) _fileCard(message.filePath!),
             if (message.costChip != null || message.timeChip != null)
               Container(
                 margin: const EdgeInsets.only(top: 9),
@@ -112,6 +116,92 @@ class ChatBubble extends StatelessWidget {
         children: isUser
             ? [bubble, const SizedBox(width: 10), avatar]
             : [avatar, const SizedBox(width: 10), bubble],
+      ),
+    );
+  }
+
+  Widget _imagePreview(String url) => Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(JeonRadius.small),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 320),
+            child: Image.network(
+              url,
+              width: double.infinity,
+              fit: BoxFit.cover,
+              loadingBuilder: (context, child, progress) {
+                if (progress == null) return child;
+                return Container(
+                  height: 180,
+                  alignment: Alignment.center,
+                  color: JeonColors.surface3,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: JeonColors.accent,
+                    value: progress.expectedTotalBytes != null
+                        ? progress.cumulativeBytesLoaded / progress.expectedTotalBytes!
+                        : null,
+                  ),
+                );
+              },
+              errorBuilder: (context, error, stackTrace) => Container(
+                height: 120,
+                alignment: Alignment.center,
+                color: JeonColors.surface3,
+                child: const Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.broken_image_outlined, color: JeonColors.inkFaint, size: 24),
+                    SizedBox(height: 6),
+                    Text('Gambar gagal dimuat', style: TextStyle(fontSize: 11, color: JeonColors.inkFaint)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+  Widget _fileCard(String path) {
+    final name = path.contains('/') ? path.substring(path.lastIndexOf('/') + 1) : path;
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+      decoration: BoxDecoration(
+        color: JeonColors.surface3,
+        border: Border.all(color: JeonColors.borderSoft),
+        borderRadius: BorderRadius.circular(JeonRadius.small),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration:
+                BoxDecoration(color: JeonColors.accentGlow, borderRadius: BorderRadius.circular(8)),
+            alignment: Alignment.center,
+            child: const Icon(Icons.insert_drive_file_outlined, size: 16, color: JeonColors.accent),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style:
+                        const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: JeonColors.ink)),
+                Text('File dibuat oleh agent di server · $path',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 10.5, color: JeonColors.inkFaint)),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -14,19 +14,35 @@ import '../models/message.dart';
 class ApiService {
   String baseUrl;
   String apiKey;
+  String? sessionToken;
+  bool isGuest;
 
-  ApiService({required this.baseUrl, required this.apiKey});
+  ApiService({
+    required this.baseUrl,
+    required this.apiKey,
+    this.sessionToken,
+    this.isGuest = false,
+  });
 
   static const _prefsBaseUrlKey = 'jeonchat_base_url';
   static const _prefsApiKeyKey = 'jeonchat_api_key';
+  static const _prefsSessionTokenKey = 'jeonchat_session_token';
+  static const _prefsGuestKey = 'jeonchat_guest_mode';
 
   static const String defaultBaseUrl = 'https://chat.jeonlive.com';
+
+  bool get isLoggedIn => sessionToken != null && sessionToken!.isNotEmpty;
+
+  /// True once the user has either logged in or chosen "Coba Gratis".
+  bool get isAuthenticated => isLoggedIn || isGuest;
 
   static Future<ApiService> loadFromPrefs() async {
     final prefs = await SharedPreferences.getInstance();
     return ApiService(
       baseUrl: prefs.getString(_prefsBaseUrlKey) ?? defaultBaseUrl,
       apiKey: prefs.getString(_prefsApiKeyKey) ?? 'jeongpt-demo',
+      sessionToken: prefs.getString(_prefsSessionTokenKey),
+      isGuest: prefs.getBool(_prefsGuestKey) ?? false,
     );
   }
 
@@ -34,11 +50,58 @@ class ApiService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefsBaseUrlKey, baseUrl);
     await prefs.setString(_prefsApiKeyKey, apiKey);
+    await prefs.setBool(_prefsGuestKey, isGuest);
+    if (sessionToken != null && sessionToken!.isNotEmpty) {
+      await prefs.setString(_prefsSessionTokenKey, sessionToken!);
+    } else {
+      await prefs.remove(_prefsSessionTokenKey);
+    }
+  }
+
+  /// Skips credentials entirely — "Coba Gratis" on the login screen.
+  Future<void> continueAsGuest() async {
+    isGuest = true;
+    await saveToPrefs();
+  }
+
+  Future<String> login({required String email, required String password}) async {
+    if (!isConfigured) {
+      throw ApiException('Base URL belum diatur. Isi Server URL untuk login.');
+    }
+    final res = await http
+        .post(
+          _uri('/auth/login'),
+          headers: const {'Content-Type': 'application/json'},
+          body: jsonEncode({'email': email, 'password': password}),
+        )
+        .timeout(_shortTimeout, onTimeout: () => throw ApiException(
+            'Timeout: server tidak merespons.'));
+    if (res.statusCode != 200) {
+      throw ApiException('Login gagal (${res.statusCode}): ${res.body}');
+    }
+    final data = jsonDecode(res.body);
+    final token = (data is Map<String, dynamic>)
+        ? (data['token'] ?? data['session_token'] ?? data['access_token'])?.toString()
+        : null;
+    if (token == null || token.isEmpty) {
+      throw ApiException('Login gagal: token tidak ditemukan pada respons server.');
+    }
+    sessionToken = token;
+    await saveToPrefs();
+    return token;
+  }
+
+  Future<void> logout() async {
+    sessionToken = null;
+    isGuest = false;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_prefsSessionTokenKey);
+    await prefs.remove(_prefsGuestKey);
   }
 
   Map<String, String> get _headers => {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer $apiKey',
+        'Authorization': 'Bearer ${sessionToken ?? apiKey}',
       };
 
   Uri _uri(String path) => Uri.parse('$baseUrl$path');
@@ -47,6 +110,16 @@ class ApiService {
   static const _chatTimeout = Duration(seconds: 90);
 
   bool get isConfigured => baseUrl.isNotEmpty;
+
+  // Sama dengan system prompt versi Telegram — dikirim sebagai pesan
+  // pertama (role "system") di setiap request /chat, sebelum riwayat user.
+  static const _systemPrompt = "Kamu adalah JEON Chat, asisten AI untuk owner JEON (M Joko Lukito). "
+      "Panggil owner 'Appa Jeon'. "
+      "Kamu punya tools: video editor, AI clipper, image generator, TTS, sound effects, "
+      "filter foto/video, laporan multi-format, dan 103 skill. "
+      "Jawab dalam bahasa Indonesia, gaya natural, bantu end-to-end. "
+      "Kalau diminta buat video/gambar/suara, bilang kamu bisa bantu via tools JEON. "
+      "Tidak perlu bilang 'aku tidak bisa' — bilang 'aku bisa bantu lewat tools JEON'.";
 
   Future<List<String>> getModels() async {
     if (!isConfigured) throw ApiException('Base URL belum diatur di Settings.');
@@ -71,7 +144,10 @@ class ApiService {
       throw ApiException('Base URL belum diatur. Buka Settings untuk isi URL backend.');
     }
     final body = {
-      'messages': history.map((m) => m.toApiJson()).toList(),
+      'messages': [
+        {'role': 'system', 'content': _systemPrompt},
+        ...history.map((m) => m.toApiJson()),
+      ],
       'model': model,
       if (sessionId != null && sessionId.isNotEmpty) 'session_id': sessionId,
     };
@@ -184,7 +260,7 @@ class ApiService {
       throw ApiException('Image gagal (${res.statusCode})');
     }
     final data = jsonDecode(res.body) as Map<String, dynamic>;
-    return data['image_url']?.toString() ?? '';
+    return (data['image_url'] ?? data['url'] ?? data['imageUrl'])?.toString() ?? '';
   }
 
   /// Media pipeline cepat — gambar via /media/image (gratis dulu: library/Openverse/Wikimedia/Pollinations)
@@ -225,7 +301,7 @@ class ApiService {
       throw ApiException('TTS gagal (${res.statusCode})');
     }
     final data = jsonDecode(res.body) as Map<String, dynamic>;
-    return data['audio_url']?.toString() ?? '';
+    return (data['audio_url'] ?? data['url'] ?? data['audioUrl'])?.toString() ?? '';
   }
 }
 

@@ -11,10 +11,7 @@ class ChatHistoryService {
   /// Simpan semua pesan ke storage
   static Future<void> save(List<ChatMessage> messages, {String? agentSession}) async {
     final prefs = await SharedPreferences.getInstance();
-    final jsonList = messages.map((m) => {
-      'isUser': m.isUser,
-      'text': m.text,
-    }).toList();
+    final jsonList = messages.map((m) => m.toJson()).toList();
     await prefs.setString(_key, jsonEncode(jsonList));
     if (agentSession != null) {
       await prefs.setString(_sessionKey, agentSession);
@@ -28,10 +25,7 @@ class ChatHistoryService {
     if (raw == null || raw.isEmpty) return [];
     try {
       final list = jsonDecode(raw) as List;
-      return list.map((e) => ChatMessage(
-        isUser: e['isUser'] == true,
-        text: (e['text'] ?? '').toString(),
-      )).toList();
+      return list.whereType<Map<String, dynamic>>().map(ChatMessage.fromJson).toList();
     } catch (_) {
       return [];
     }
