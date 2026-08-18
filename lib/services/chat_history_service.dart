@@ -118,9 +118,9 @@ class ChatHistoryService {
 
   /// Simpan pesan-pesan sebuah conversation. [title] dipaksa (rename manual,
   /// mematikan auto-title seterusnya); kalau tidak diisi dan auto-title masih
-  /// aktif, judul di-generate ulang dari pesan user TERAKHIR tiap kali di-save
-  /// (dipanggil setelah user kirim pesan maupun setelah balasan AI datang) —
-  /// jadi judul ikut ter-update selama belum pernah di-rename manual.
+  /// aktif, judul di-generate dari pesan user PERTAMA (lihat autoTitle()) —
+  /// begitu pesan pertama terkirim judulnya langsung kebentuk dan tetap sama
+  /// untuk pesan-pesan berikutnya, kecuali di-rename manual.
   static Future<void> saveConversation(
     String id,
     List<ChatMessage> messages, {
@@ -223,17 +223,41 @@ class ChatHistoryService {
     await _writeConversations(prefs, list);
   }
 
-  /// Judul otomatis dari pesan user TERAKHIR (bukan cuma pesan pertama) —
-  /// dipanggil ulang tiap saveConversation() selama auto-title masih aktif,
-  /// jadi ganti topik ikut kerekam. Huruf pertama dikapitalkan, dipotong
-  /// maksimal 40 karakter + "...". Tidak ada panggilan API — murni dari teks
-  /// pesan yang sudah ada.
+  /// Judul otomatis dari pesan user PERTAMA — sekali terisi, judul tetap
+  /// sama walau ada pesan/balasan berikutnya (deterministik: pesan pertama
+  /// tidak pernah berubah, jadi hasilnya otomatis "beku" tanpa perlu flag
+  /// tambahan). Huruf pertama dikapitalkan, dipotong maksimal 40 karakter +
+  /// "...". Tidak ada panggilan API — murni dari teks pesan yang sudah ada.
   static Future<String> autoTitle(List<ChatMessage> messages) async {
     final userTexts = messages.where((m) => m.isUser && m.text.trim().isNotEmpty).toList();
     if (userTexts.isEmpty) return 'Percakapan Baru';
-    final text = userTexts.last.text.trim();
+    final text = userTexts.first.text.trim();
     final capitalized = text[0].toUpperCase() + text.substring(1);
     return capitalized.length > 40 ? '${capitalized.substring(0, 40)}...' : capitalized;
+  }
+
+  /// Jaring pengaman satu kali: perbaiki SEMUA judul yang masih placeholder
+  /// default padahal conversation-nya sudah punya pesan user — dipanggil
+  /// sekali saat chat screen dimuat, supaya chat lama yang kepentok bug lama
+  /// ("selalu Percakapan Baru") langsung benar di sidebar tanpa perlu diklik
+  /// satu-satu dulu. Tidak menyentuh judul yang sudah pernah di-rename manual.
+  static Future<void> fixAllStaleTitles() async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = await _readConversations(prefs);
+    var changed = false;
+    for (var i = 0; i < list.length; i++) {
+      final existing = list[i];
+      if (!_isTitleAuto(existing)) continue;
+      final rawMessages = existing['messages'];
+      if (rawMessages is! List) continue;
+      final messages = rawMessages.whereType<Map<String, dynamic>>().map(ChatMessage.fromJson).toList();
+      final newTitle = await autoTitle(messages);
+      if (newTitle != existing['title']) {
+        list[i] = {...existing, 'title': newTitle, 'titleAuto': true};
+        changed = true;
+      }
+    }
+    if (changed) await _writeConversations(prefs, list);
   }
 
   // ---- Projects ----

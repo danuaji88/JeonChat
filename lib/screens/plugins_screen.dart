@@ -15,20 +15,33 @@ class PluginItem {
   const PluginItem({required this.emoji, required this.title, required this.description});
 }
 
-/// Halaman Plugins ala ChatGPT — tab Plugins (Installed/Featured/Productivity/
-/// Creativity) + tab Skills (daftar skill JEON + tambah skill custom sendiri,
-/// disimpan ke SharedPreferences).
-class PluginsScreen extends StatefulWidget {
-  const PluginsScreen({super.key});
+/// Isi Plugin Store ala ChatGPT — dipakai SEBAGAI KONTEN AREA CHAT (bukan
+/// route/Scaffold sendiri) supaya sidebar tetap terlihat. Status install
+/// plugin (tab Plugins) dikendalikan parent lewat [installedTitles] +
+/// [onTogglePlugin] — persisted lewat PluginService — supaya sinkron dengan
+/// section "My Plugins" di sidebar dan badge di input bar. Tab Skills tetap
+/// state internal (belum diminta ikut dipersist/diselaraskan ke luar).
+class PluginsStoreView extends StatefulWidget {
+  final Set<String> installedTitles;
+  final ValueChanged<PluginItem> onTogglePlugin;
+  final VoidCallback onBack;
+
+  const PluginsStoreView({
+    super.key,
+    required this.installedTitles,
+    required this.onTogglePlugin,
+    required this.onBack,
+  });
 
   @override
-  State<PluginsScreen> createState() => _PluginsScreenState();
+  State<PluginsStoreView> createState() => _PluginsStoreViewState();
 }
 
-class _PluginsScreenState extends State<PluginsScreen> {
+class _PluginsStoreViewState extends State<PluginsStoreView> {
   static const _bg = Colors.black;
   static const _pillBg = Color(0xFF1A1A1A);
   static const _borderColor = Color(0xFF262626);
+  static const _installedGreen = Color(0xFF2ECC71);
   static const _ink = Colors.white;
   static const _inkMuted = Color(0xFF8E8E93);
 
@@ -80,7 +93,6 @@ class _PluginsScreenState extends State<PluginsScreen> {
   final _searchController = TextEditingController();
   String _query = '';
 
-  final Set<String> _installedPlugins = {};
   final Set<String> _installedSkills = {};
   List<Map<String, String>> _customSkills = [];
 
@@ -118,14 +130,6 @@ class _PluginsScreenState extends State<PluginsScreen> {
     await prefs.setString(_customSkillsKey, jsonEncode(skills));
   }
 
-  void _togglePlugin(String title) => setState(() {
-        if (_installedPlugins.contains(title)) {
-          _installedPlugins.remove(title);
-        } else {
-          _installedPlugins.add(title);
-        }
-      });
-
   void _toggleSkill(String title) => setState(() {
         if (_installedSkills.contains(title)) {
           _installedSkills.remove(title);
@@ -137,22 +141,20 @@ class _PluginsScreenState extends State<PluginsScreen> {
   @override
   Widget build(BuildContext context) {
     final isWide = MediaQuery.of(context).size.width >= 600;
-    return Scaffold(
-      backgroundColor: _bg,
-      body: SafeArea(
-        child: Column(
-          children: [
-            _backRow(),
-            _tabSwitcher(),
-            const SizedBox(height: 4),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-                child: _tab == _Tab.plugins ? _pluginsBody(isWide) : _skillsBody(isWide),
-              ),
+    return Container(
+      color: _bg,
+      child: Column(
+        children: [
+          _backRow(),
+          _tabSwitcher(),
+          const SizedBox(height: 4),
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+              child: _tab == _Tab.plugins ? _pluginsBody(isWide) : _skillsBody(isWide),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -161,10 +163,20 @@ class _PluginsScreenState extends State<PluginsScreen> {
         padding: const EdgeInsets.fromLTRB(4, 4, 4, 0),
         child: Row(
           children: [
-            IconButton(
-              icon: const Icon(Icons.arrow_back, size: 20, color: _ink),
-              tooltip: 'Kembali',
-              onPressed: () => Navigator.of(context).maybePop(),
+            InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: widget.onBack,
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.arrow_back, size: 18, color: _ink),
+                    SizedBox(width: 6),
+                    Text('Back', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: _ink)),
+                  ],
+                ),
+              ),
             ),
           ],
         ),
@@ -304,80 +316,54 @@ class _PluginsScreenState extends State<PluginsScreen> {
       );
 
   // ---- Tab Plugins ----
+  // Plugin yang sudah di-install "pindah" ke section Installed di paling
+  // atas (dan hilang dari section kategori aslinya) — status install datang
+  // dari widget.installedTitles (dikendalikan parent, persisted).
 
   Widget _pluginsBody(bool isWide) {
     final q = _query.trim().toLowerCase();
     bool matches(PluginItem p) => q.isEmpty || p.title.toLowerCase().contains(q);
-    final featured = _featured.where(matches).toList();
-    final productivity = _productivity.where(matches).toList();
-    final creativity = _creativity.where(matches).toList();
-    final empty = featured.isEmpty && productivity.isEmpty && creativity.isEmpty;
+    bool isInstalled(PluginItem p) => widget.installedTitles.contains(p.title);
+
+    final allPlugins = [..._featured, ..._productivity, ..._creativity];
+    final installed = allPlugins.where((p) => isInstalled(p) && matches(p)).toList();
+    final featured = _featured.where((p) => !isInstalled(p) && matches(p)).toList();
+    final productivity = _productivity.where((p) => !isInstalled(p) && matches(p)).toList();
+    final creativity = _creativity.where((p) => !isInstalled(p) && matches(p)).toList();
+    final empty = installed.isEmpty && featured.isEmpty && productivity.isEmpty && creativity.isEmpty;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _header(isWide, 'Plugins', 'Tambahkan tools untuk membuat JeonAI lebih cerdas'),
-        _sectionLabel('Installed', trailingChevron: true),
-        const SizedBox(height: 10),
-        _installedRow(),
-        const SizedBox(height: 22),
         if (empty) _noResults(),
+        if (installed.isNotEmpty) ...[
+          _sectionLabel('Installed'),
+          const SizedBox(height: 10),
+          _grid(installed.map((p) => _toolTile(p, true, () => widget.onTogglePlugin(p))).toList(), isWide),
+          const SizedBox(height: 22),
+        ],
         if (featured.isNotEmpty) ...[
           _sectionLabel('Featured'),
           const SizedBox(height: 10),
-          _grid(
-            featured.map((p) => _toolTile(p, _installedPlugins.contains(p.title), () => _togglePlugin(p.title))).toList(),
-            isWide,
-          ),
+          _grid(featured.map((p) => _toolTile(p, false, () => widget.onTogglePlugin(p))).toList(), isWide),
           _seeMore(),
           const SizedBox(height: 22),
         ],
         if (productivity.isNotEmpty) ...[
           _sectionLabel('Productivity'),
           const SizedBox(height: 10),
-          _grid(
-            productivity
-                .map((p) => _toolTile(p, _installedPlugins.contains(p.title), () => _togglePlugin(p.title)))
-                .toList(),
-            isWide,
-          ),
+          _grid(productivity.map((p) => _toolTile(p, false, () => widget.onTogglePlugin(p))).toList(), isWide),
           _seeMore(),
           const SizedBox(height: 22),
         ],
         if (creativity.isNotEmpty) ...[
           _sectionLabel('Creativity'),
           const SizedBox(height: 10),
-          _grid(
-            creativity.map((p) => _toolTile(p, _installedPlugins.contains(p.title), () => _togglePlugin(p.title))).toList(),
-            isWide,
-          ),
+          _grid(creativity.map((p) => _toolTile(p, false, () => widget.onTogglePlugin(p))).toList(), isWide),
           _seeMore(),
         ],
       ],
-    );
-  }
-
-  Widget _installedRow() {
-    final all = [..._featured, ..._productivity, ..._creativity];
-    final installed = all.where((p) => _installedPlugins.contains(p.title)).toList();
-    if (installed.isEmpty) {
-      return const Text('Belum ada plugin aktif — tap "+" di bawah untuk aktifkan.',
-          style: TextStyle(fontSize: 11.5, color: _inkMuted));
-    }
-    return SizedBox(
-      height: 40,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        itemCount: installed.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 10),
-        itemBuilder: (context, i) => Container(
-          width: 40,
-          height: 40,
-          decoration: const BoxDecoration(shape: BoxShape.circle, color: _pillBg),
-          alignment: Alignment.center,
-          child: Text(installed[i].emoji, style: const TextStyle(fontSize: 17)),
-        ),
-      ),
     );
   }
 
@@ -591,11 +577,11 @@ class _PluginsScreenState extends State<PluginsScreen> {
           height: 26,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: installed ? _ink : Colors.transparent,
-            border: Border.all(color: _ink, width: 1),
+            color: installed ? _installedGreen : Colors.transparent,
+            border: Border.all(color: installed ? _installedGreen : _ink, width: 1),
           ),
           alignment: Alignment.center,
-          child: Icon(installed ? Icons.check : Icons.add, size: 15, color: installed ? Colors.black : _ink),
+          child: Icon(installed ? Icons.check : Icons.add, size: 15, color: installed ? Colors.white : _ink),
         ),
       );
 }

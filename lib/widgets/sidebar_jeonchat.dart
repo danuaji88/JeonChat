@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 
 import '../services/api_service.dart';
+import '../services/plugin_service.dart';
 import '../services/profile_service.dart';
 import 'profile_menu_sheet.dart';
 
@@ -24,6 +25,13 @@ class JeonChatSidebar extends StatefulWidget {
   final VoidCallback? onProfileChanged;
   final VoidCallback? onOpenLibrary;
   final VoidCallback? onOpenPlugins;
+  final VoidCallback? onOpenScheduled;
+  final VoidCallback? onOpenMore;
+
+  // ---- My Plugins ----
+  final List<InstalledPlugin> installedPlugins;
+  final ValueChanged<String>? onSelectPlugin;
+  final ValueChanged<String>? onDeactivatePlugin;
 
   // ---- Projects ----
   final List<Map<String, dynamic>> projects;
@@ -63,6 +71,11 @@ class JeonChatSidebar extends StatefulWidget {
     this.onProfileChanged,
     this.onOpenLibrary,
     this.onOpenPlugins,
+    this.onOpenScheduled,
+    this.onOpenMore,
+    this.installedPlugins = const [],
+    this.onSelectPlugin,
+    this.onDeactivatePlugin,
   });
 
   @override
@@ -135,10 +148,14 @@ class _JeonChatSidebarState extends State<JeonChatSidebar> {
           const SizedBox(height: 6),
           _modeToggle(),
           const SizedBox(height: 6),
-          _navItem(Icons.auto_stories_outlined, 'Library', onTap: widget.onOpenLibrary),
-          _navItem(Icons.schedule_outlined, 'Scheduled'),
-          _navItem(Icons.extension_outlined, 'Plugins', onTap: widget.onOpenPlugins),
-          _navItem(Icons.more_horiz, 'More'),
+          _navItem(Icons.auto_stories_outlined, 'Library', onTap: widget.onOpenLibrary, locked: !widget.api.isLoggedIn),
+          _navItem(Icons.schedule_outlined, 'Scheduled', onTap: widget.onOpenScheduled, locked: !widget.api.isLoggedIn),
+          _navItem(Icons.extension_outlined, 'Plugins', onTap: widget.onOpenPlugins, locked: !widget.api.isLoggedIn),
+          _navItem(Icons.more_horiz, 'More', onTap: widget.onOpenMore, locked: !widget.api.isLoggedIn),
+          if (widget.installedPlugins.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            _myPluginsSection(),
+          ],
           const SizedBox(height: 6),
           Expanded(
             child: ListView(
@@ -285,7 +302,7 @@ class _JeonChatSidebarState extends State<JeonChatSidebar> {
         ),
       );
 
-  Widget _navItem(IconData icon, String label, {VoidCallback? onTap}) => InkWell(
+  Widget _navItem(IconData icon, String label, {VoidCallback? onTap, bool locked = false}) => InkWell(
         onTap: onTap ?? () {},
         hoverColor: _hoverBg,
         child: Padding(
@@ -296,12 +313,111 @@ class _JeonChatSidebarState extends State<JeonChatSidebar> {
               children: [
                 Icon(icon, size: 17, color: _inkMuted),
                 const SizedBox(width: 10),
-                Text(label, style: const TextStyle(fontSize: 14, color: _ink)),
+                Expanded(
+                  child: Text(label,
+                      overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14, color: _ink)),
+                ),
+                if (locked) const Icon(Icons.lock_outline, size: 14, color: _inkFaint),
               ],
             ),
           ),
         ),
       );
+
+  Widget _myPluginsSection() => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _sectionLabel('My Plugins'),
+          ...widget.installedPlugins.map(_pluginRow),
+        ],
+      );
+
+  Widget _pluginRow(InstalledPlugin plugin) => Container(
+        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          hoverColor: _hoverBg,
+          onTap: () => widget.onSelectPlugin?.call(plugin.title),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            child: Row(
+              children: [
+                Text(plugin.emoji, style: const TextStyle(fontSize: 14)),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Text(plugin.title,
+                      maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13, color: _ink)),
+                ),
+                InkWell(
+                  borderRadius: BorderRadius.circular(6),
+                  onTap: () => _openPluginMenu(plugin),
+                  child: const Padding(
+                    padding: EdgeInsets.all(4),
+                    child: Icon(Icons.more_horiz, size: 16, color: _inkMuted),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+
+  Future<void> _openPluginMenu(InstalledPlugin plugin) async {
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF171717),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 10),
+            Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+            ),
+            const SizedBox(height: 6),
+            _menuTile(Icons.info_outline, 'Lihat detail', onTap: () {
+              Navigator.of(sheetContext).pop();
+              _showPluginDetail(plugin);
+            }),
+            _menuTile(Icons.power_settings_new, 'Nonaktifkan', color: _deleteRed, onTap: () {
+              Navigator.of(sheetContext).pop();
+              widget.onDeactivatePlugin?.call(plugin.title);
+            }),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showPluginDetail(InstalledPlugin plugin) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF171717),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(plugin.emoji, style: const TextStyle(fontSize: 20)),
+            const SizedBox(width: 10),
+            Flexible(child: Text(plugin.title, style: const TextStyle(color: _ink, fontSize: 15.5))),
+          ],
+        ),
+        content: const Text('Plugin ini aktif dan bisa dipakai JeonAI di percakapanmu.',
+            style: TextStyle(color: _inkMuted, fontSize: 12.8)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Tutup', style: TextStyle(color: _inkMuted)),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _projectsSection() => Column(
         crossAxisAlignment: CrossAxisAlignment.start,

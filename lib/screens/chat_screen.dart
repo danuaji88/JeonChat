@@ -6,8 +6,10 @@ import '../models/agent.dart';
 import '../models/message.dart';
 import '../services/api_service.dart';
 import '../services/chat_history_service.dart';
+import '../services/plugin_service.dart';
 import '../services/profile_service.dart';
 import '../theme.dart';
+import 'auth_gate_screen.dart';
 import 'library_screen.dart';
 import 'plugins_screen.dart';
 import '../widgets/chat_bubble.dart';
@@ -40,6 +42,10 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
   // ---- Projects ----
   List<Map<String, dynamic>> _projects = [];
   String? _activeProjectId;
+
+  // ---- Plugin Store (area chat digantikan, sidebar tetap terlihat) ----
+  bool _showPluginsStore = false;
+  List<InstalledPlugin> _installedPlugins = [];
 
   // Deteksi file yang disebut agent (mis. "disimpan di /tmp/xxx.jpg") agar
   // bisa ditampilkan sebagai preview gambar/audio, bukan cuma teks path.
@@ -99,6 +105,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
   void initState() {
     super.initState();
     _loadConversations();
+    _loadInstalledPlugins();
   }
 
   /// Dipanggil JeonChatInputBar setelah mode Voice selesai mendengarkan —
@@ -130,8 +137,11 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
   }
 
   /// Load daftar semua percakapan lalu buka yang paling baru — bikin satu
-  /// percakapan kosong kalau belum ada sama sekali.
+  /// percakapan kosong kalau belum ada sama sekali. Sebelum ditampilkan,
+  /// perbaiki dulu judul lama yang masih kepentok "Percakapan Baru" padahal
+  /// sudah ada isi pesan (lihat ChatHistoryService.fixAllStaleTitles).
   Future<void> _loadConversations() async {
+    await ChatHistoryService.fixAllStaleTitles();
     final projects = await ChatHistoryService.listProjects();
     final list = await ChatHistoryService.listConversations();
     if (!mounted) return;
@@ -247,12 +257,16 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       _agentSession = null;
       _conversations = list;
       _messagesOpacity = 0.0;
+      _showPluginsStore = false;
     });
     _fadeInMessages();
   }
 
   Future<void> _openChat(String id) async {
-    if (id == _conversationId) return;
+    if (id == _conversationId) {
+      if (_showPluginsStore) setState(() => _showPluginsStore = false);
+      return;
+    }
     final conv = await ChatHistoryService.loadConversation(id);
     if (!mounted || conv == null) return;
     setState(() {
@@ -260,10 +274,40 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       _messages = _messagesFromConversation(conv);
       _agentSession = conv['agentSession'] as String?;
       _messagesOpacity = 0.0;
+      _showPluginsStore = false;
     });
     _fadeInMessages();
     _scrollToBottom();
   }
+
+  // ---- Plugin Store: install state dipersist via PluginService, dipakai
+  // bareng oleh Plugin Store sendiri, "My Plugins" di sidebar, dan badge
+  // di input bar. ----
+
+  Future<void> _loadInstalledPlugins() async {
+    final list = await PluginService.listInstalled();
+    if (!mounted) return;
+    setState(() => _installedPlugins = list);
+  }
+
+  Future<void> _togglePlugin(PluginItem item) async {
+    final installed = _installedPlugins.any((p) => p.title == item.title);
+    final updated = installed
+        ? await PluginService.uninstall(item.title)
+        : await PluginService.install(item.title, item.emoji);
+    if (!mounted) return;
+    setState(() => _installedPlugins = updated);
+  }
+
+  Future<void> _deactivatePlugin(String title) async {
+    final updated = await PluginService.uninstall(title);
+    if (!mounted) return;
+    setState(() => _installedPlugins = updated);
+  }
+
+  void _openPluginsStore() => setState(() => _showPluginsStore = true);
+
+  void _closePluginsStore() => setState(() => _showPluginsStore = false);
 
   Future<void> _renameConversation(String id, String title) async {
     await ChatHistoryService.renameConversation(id, title);
@@ -345,14 +389,63 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     super.dispose();
   }
 
+  /// Auth gate ala ChatGPT: Plugins/Library/Scheduled/More butuh login —
+  /// mode tamu cuma boleh chat dasar. Token tersimpan (isLoggedIn) → langsung
+  /// jalankan [onGranted]; belum → tampilkan AuthGateScreen dulu, baru
+  /// jalankan [onGranted] kalau berhasil masuk (bukan sekadar Batal).
+  Future<void> _requireAuth(VoidCallback onGranted) async {
+    if (widget.api.isLoggedIn) {
+      onGranted();
+      return;
+    }
+    final granted = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => AuthGateScreen(api: widget.api)),
+    );
+    if (!mounted) return;
+    if (granted == true) {
+      setState(() {}); // refresh ikon gembok di sidebar
+      onGranted();
+    }
+  }
+
+  static const _thinkingText = 'JeonAI Sedang Berpikir Lalu Eksekusi Mohon Ditunggu';
+
+  /// Ganti placeholder "Sedang berpikir" ([typing]) dengan balasan asli DI
+  /// POSISI YANG SAMA — pakai identity check (bukan asumsi "typing selalu
+  /// elemen terakhir"), supaya kalau user sempat kirim pesan lain sebelum
+  /// balasan ini datang (dua request nyala bersamaan), yang dihapus/diganti
+  /// selalu placeholder yang BENAR. Sebelumnya pakai
+  /// `_messages.sublist(0, _messages.length - 1)` yang salah target begitu
+  /// ada pesan lain menyusul di akhir list — itu penyebab loading nyangkut
+  /// selamanya (Bug 1) dan balasan nongol di bubble/urutan yang salah (Bug 2).
+  void _resolveTyping(ChatMessage typing, ChatMessage reply) {
+    setState(() {
+      final idx = _messages.indexWhere((m) => identical(m, typing));
+      if (idx == -1) {
+        _messages = [..._messages, reply];
+      } else {
+        _messages = [
+          ..._messages.sublist(0, idx),
+          reply,
+          ..._messages.sublist(idx + 1),
+        ];
+      }
+    });
+  }
+
+  /// Riwayat buat dikirim ke /chat — buang semua bubble placeholder "Sedang
+  /// berpikir" (termasuk punya request lain yang mungkin masih nyala
+  /// bersamaan) dan pesan error, supaya tidak ikut kekirim sebagai konteks.
+  List<ChatMessage> _cleanHistory() =>
+      _messages.where((m) => m.text != _thinkingText && !m.text.startsWith('⚠️')).toList();
+
   Future<void> _send(String text, String model) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
+    final typing = ChatMessage(isUser: false, text: _thinkingText);
     setState(() {
-      _messages = [..._messages, ChatMessage(isUser: true, text: trimmed)];
+      _messages = [..._messages, ChatMessage(isUser: true, text: trimmed), typing];
       _guestMessageCount++;
-      // Typing indicator — selalu tampil untuk setiap pesan baru
-      _messages = [..._messages, ChatMessage(isUser: false, text: 'JeonAI Sedang Berpikir Lalu Eksekusi Mohon Ditunggu')];
     });
     _saveHistory();
     _scrollToBottom();
@@ -369,39 +462,29 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     final isCostRequest = lower.contains('cek biaya') || lower.contains('cek cost') || lower.contains('biaya') || lower.contains('harga');
 
     if (isImageRequest || isVideoRequest || isAudioRequest) {
-      await _handleMediaRequest(trimmed, isImageRequest, isVideoRequest, isAudioRequest);
+      await _handleMediaRequest(trimmed, isImageRequest, isVideoRequest, isAudioRequest, typing);
       return;
     }
     if (isCostRequest) {
-      await _handleCostRequest(model);
+      await _handleCostRequest(model, typing);
       return;
     }
 
     // ── Normal: agent / chat ──
-    await _handleChatRequest(trimmed, model);
+    await _handleChatRequest(trimmed, model, typing);
   }
 
-  Future<void> _handleCostRequest(String model) async {
+  Future<void> _handleCostRequest(String model, ChatMessage typing) async {
     try {
-      final reply = await widget.api.sendChat(
-        history: _messages.where((m) => !m.text.startsWith('JeonAI Sedang') && !m.text.startsWith('⚠️')).toList(),
-        model: model,
-      );
-      setState(() {
-        _messages = _messages.sublist(0, _messages.length - 1); // hapus typing
-        _messages = [..._messages, ChatMessage(isUser: false, text: reply)];
-      });
-      _saveHistory();
+      final reply = await widget.api.sendChat(history: _cleanHistory(), model: model);
+      _resolveTyping(typing, ChatMessage(isUser: false, text: reply));
     } catch (e) {
-      setState(() {
-        _messages = _messages.sublist(0, _messages.length - 1);
-        _messages = [..._messages, ChatMessage(isUser: false, text: '⚠️ Gagal cek biaya: $e')];
-      });
-      _saveHistory();
+      _resolveTyping(typing, ChatMessage(isUser: false, text: '⚠️ Gagal cek biaya: $e'));
     }
+    _saveHistory();
   }
 
-  Future<void> _handleMediaRequest(String text, bool isImg, bool isVid, bool isAudio) async {
+  Future<void> _handleMediaRequest(String text, bool isImg, bool isVid, bool isAudio, ChatMessage typing) async {
     try {
       // Ekstrak prompt bersih dari teks user
       String prompt = text;
@@ -416,53 +499,41 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
 
       if (isImg) {
         final imageUrl = await widget.api.generateMediaImage(prompt);
-        // Coba download ke lokal dulu via Image.network dari server kita (no CORS)
-        setState(() {
-          _messages = _messages.sublist(0, _messages.length - 1); // hapus typing
-          _messages = [..._messages, ChatMessage(
-            isUser: false,
-            text: '✅ Gambar siap! 📸\nPrompt: $prompt',
-            imageUrl: imageUrl,
-          )];
-        });
+        _resolveTyping(typing, ChatMessage(
+          isUser: false,
+          text: '✅ Gambar siap! 📸\nPrompt: $prompt',
+          imageUrl: imageUrl,
+        ));
         _saveHistory();
       } else if (isVid) {
         final videoUrl = await widget.api.generateMediaVideo(prompt);
-        setState(() {
-          _messages = _messages.sublist(0, _messages.length - 1);
-          _messages = [..._messages, ChatMessage(
-            isUser: false,
-            text: '✅ Video siap! 🎬\nPrompt: $prompt',
-            videoUrl: videoUrl,
-          )];
-        });
+        _resolveTyping(typing, ChatMessage(
+          isUser: false,
+          text: '✅ Video siap! 🎬\nPrompt: $prompt',
+          videoUrl: videoUrl,
+        ));
         _saveHistory();
       } else if (isAudio) {
         final audioUrl = await widget.api.generateTTS(prompt);
-        setState(() {
-          _messages = _messages.sublist(0, _messages.length - 1);
-          _messages = [..._messages, ChatMessage(
-            isUser: false,
-            text: '✅ Audio siap! 🔊\nTeks: $prompt',
-            audioUrl: audioUrl,
-          )];
-        });
+        _resolveTyping(typing, ChatMessage(
+          isUser: false,
+          text: '✅ Audio siap! 🔊\nTeks: $prompt',
+          audioUrl: audioUrl,
+        ));
         _saveHistory();
       }
     } catch (e) {
-      // Fallback ke agent kalau media endpoint gagal
-      setState(() {
-        _messages = _messages.sublist(0, _messages.length - 1);
-        _messages = [..._messages, ChatMessage(isUser: false, text: '⚠️ Media gagal: $e\nMencoba via agent...')];
-      });
-      _saveHistory();
-      await _handleChatRequest(text, 'jeon-chat');
+      // Fallback ke agent kalau media endpoint gagal — placeholder "Sedang
+      // berpikir" TETAP dipakai (diteruskan apa adanya), bukan diganti pesan
+      // sementara dulu baru dibuat placeholder baru lagi — biar loading
+      // indicator tidak sempat hilang-lalu-muncul-lagi.
+      await _handleChatRequest(text, 'jeon-chat', typing);
     } finally {
       _scrollToBottom();
     }
   }
 
-  Future<void> _handleChatRequest(String text, String model) async {
+  Future<void> _handleChatRequest(String text, String model, ChatMessage typing) async {
     try {
       final result = await widget.api.sendAgentPrompt(
         prompt: text,
@@ -471,54 +542,26 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       if (result.agentSession != null) {
         _agentSession = result.agentSession;
       }
-      setState(() {
-        _messages = _messages.sublist(0, _messages.length - 1); // hapus typing
-        _messages = [..._messages, _buildAgentMessage(result.content)];
-      });
+      _resolveTyping(typing, _buildAgentMessage(result.content));
       _saveHistory();
     } on AgentTimeoutException {
       // Agent timeout — auto-fallback ke /chat
       try {
-        final reply = await widget.api.sendChat(
-          history: _messages.where((m) => !m.text.startsWith('JeonAI Sedang') && !m.text.startsWith('⚠️')).toList(),
-          model: model,
-        );
-        setState(() {
-          _messages = _messages.sublist(0, _messages.length - 1);
-          _messages = [..._messages, ChatMessage(isUser: false, text: reply)];
-        });
+        final reply = await widget.api.sendChat(history: _cleanHistory(), model: model);
+        _resolveTyping(typing, ChatMessage(isUser: false, text: reply));
         _saveHistory();
       } catch (e2) {
-        setState(() {
-          _messages = _messages.sublist(0, _messages.length - 1);
-          _messages = [
-            ..._messages,
-            ChatMessage(isUser: false, text: 'Maaf, koneksi lambat. Coba ulangi ya Appa 🙏'),
-          ];
-        });
+        _resolveTyping(typing, ChatMessage(isUser: false, text: 'Maaf, koneksi lambat. Coba ulangi ya Appa 🙏'));
         _saveHistory();
       }
     } catch (e) {
       // Fallback ke /chat kalau /agent gagal
-      setState(() {
-        _messages = _messages.sublist(0, _messages.length - 1);
-      });
       try {
-        final reply = await widget.api.sendChat(
-          history: _messages,
-          model: model,
-        );
-        setState(() {
-          _messages = [..._messages, ChatMessage(isUser: false, text: reply)];
-        });
+        final reply = await widget.api.sendChat(history: _cleanHistory(), model: model);
+        _resolveTyping(typing, ChatMessage(isUser: false, text: reply));
         _saveHistory();
       } catch (e2) {
-        setState(() {
-          _messages = [
-            ..._messages,
-            ChatMessage(isUser: false, text: '⚠️ ${e2.toString()}'),
-          ];
-        });
+        _resolveTyping(typing, ChatMessage(isUser: false, text: '⚠️ ${e2.toString()}'));
         _saveHistory();
       }
     } finally {
@@ -529,69 +572,51 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
   // ---- Aksi popover "+" JeonChatInputBar: tiap callback benar-benar panggil backend ----
 
   Future<void> _generateImageDirect(String prompt) async {
+    final typing = ChatMessage(isUser: false, text: _thinkingText);
     setState(() {
-      _messages = [..._messages, ChatMessage(isUser: true, text: 'Buat gambar: $prompt')];
-      _messages = [..._messages, ChatMessage(isUser: false, text: 'JeonAI Sedang Berpikir Lalu Eksekusi Mohon Ditunggu')];
+      _messages = [..._messages, ChatMessage(isUser: true, text: 'Buat gambar: $prompt'), typing];
     });
     _saveHistory();
     _scrollToBottom();
     try {
       final url = await widget.api.generateImage(prompt);
-      setState(() {
-        _messages = _messages.sublist(0, _messages.length - 1);
-        _messages = [..._messages, ChatMessage(isUser: false, text: '✅ Gambar siap!', imageUrl: url)];
-      });
+      _resolveTyping(typing, ChatMessage(isUser: false, text: '✅ Gambar siap!', imageUrl: url));
     } catch (e) {
-      setState(() {
-        _messages = _messages.sublist(0, _messages.length - 1);
-        _messages = [..._messages, ChatMessage(isUser: false, text: '⚠️ Gagal membuat gambar: $e')];
-      });
+      _resolveTyping(typing, ChatMessage(isUser: false, text: '⚠️ Gagal membuat gambar: $e'));
     }
     _saveHistory();
     _scrollToBottom();
   }
 
   Future<void> _generateAudioDirect(String text) async {
+    final typing = ChatMessage(isUser: false, text: _thinkingText);
     setState(() {
-      _messages = [..._messages, ChatMessage(isUser: true, text: 'Buat suara: $text')];
-      _messages = [..._messages, ChatMessage(isUser: false, text: 'JeonAI Sedang Berpikir Lalu Eksekusi Mohon Ditunggu')];
+      _messages = [..._messages, ChatMessage(isUser: true, text: 'Buat suara: $text'), typing];
     });
     _saveHistory();
     _scrollToBottom();
     try {
       final url = await widget.api.generateTTS(text);
-      setState(() {
-        _messages = _messages.sublist(0, _messages.length - 1);
-        _messages = [..._messages, ChatMessage(isUser: false, text: '✅ Audio siap!', audioUrl: url)];
-      });
+      _resolveTyping(typing, ChatMessage(isUser: false, text: '✅ Audio siap!', audioUrl: url));
     } catch (e) {
-      setState(() {
-        _messages = _messages.sublist(0, _messages.length - 1);
-        _messages = [..._messages, ChatMessage(isUser: false, text: '⚠️ Gagal membuat suara: $e')];
-      });
+      _resolveTyping(typing, ChatMessage(isUser: false, text: '⚠️ Gagal membuat suara: $e'));
     }
     _saveHistory();
     _scrollToBottom();
   }
 
   Future<void> _generateVideoDirect(String prompt) async {
+    final typing = ChatMessage(isUser: false, text: _thinkingText);
     setState(() {
-      _messages = [..._messages, ChatMessage(isUser: true, text: 'Buat video: $prompt')];
-      _messages = [..._messages, ChatMessage(isUser: false, text: 'JeonAI Sedang Berpikir Lalu Eksekusi Mohon Ditunggu')];
+      _messages = [..._messages, ChatMessage(isUser: true, text: 'Buat video: $prompt'), typing];
     });
     _saveHistory();
     _scrollToBottom();
     try {
       final url = await widget.api.generateVideo(prompt);
-      setState(() {
-        _messages = _messages.sublist(0, _messages.length - 1);
-        _messages = [..._messages, ChatMessage(isUser: false, text: '✅ Video siap!', videoUrl: url)];
-      });
+      _resolveTyping(typing, ChatMessage(isUser: false, text: '✅ Video siap!', videoUrl: url));
     } catch (e) {
-      setState(() {
-        _messages = _messages.sublist(0, _messages.length - 1);
-        _messages = [..._messages, ChatMessage(isUser: false, text: '⚠️ Gagal membuat video: $e')];
-      });
+      _resolveTyping(typing, ChatMessage(isUser: false, text: '⚠️ Gagal membuat video: $e'));
     }
     _saveHistory();
     _scrollToBottom();
@@ -658,12 +683,39 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       onProfileChanged: () => setState(() {}),
       onOpenLibrary: () {
         if (!isWide) Navigator.of(context).maybePop();
-        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LibraryScreen()));
+        _requireAuth(() {
+          Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LibraryScreen()));
+        });
       },
       onOpenPlugins: () {
         if (!isWide) Navigator.of(context).maybePop();
-        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PluginsScreen()));
+        _requireAuth(_openPluginsStore);
       },
+      onOpenScheduled: () {
+        if (!isWide) Navigator.of(context).maybePop();
+        _requireAuth(() {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Scheduled segera hadir'), duration: Duration(seconds: 1)),
+          );
+        });
+      },
+      onOpenMore: () {
+        if (!isWide) Navigator.of(context).maybePop();
+        _requireAuth(() {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Fitur ini segera hadir'), duration: Duration(seconds: 1)),
+          );
+        });
+      },
+      installedPlugins: _installedPlugins,
+      onSelectPlugin: (title) {
+        if (!isWide) Navigator.of(context).maybePop();
+        _closePluginsStore();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$title aktif'), duration: const Duration(seconds: 1)),
+        );
+      },
+      onDeactivatePlugin: _deactivatePlugin,
     );
 
     final chatScaffold = Scaffold(
@@ -787,19 +839,34 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
             onGenerateAudio: _generateAudioDirect,
             onGenerateVideo: _generateVideoDirect,
             onVoiceModeResult: _onVoiceModeResult,
+            activePluginCount: _installedPlugins.length,
+            onOpenPlugins: () => _requireAuth(_openPluginsStore),
           ),
         ],
       ),
     );
 
-    if (!isWide) return chatScaffold;
+    final pluginsStoreScaffold = Scaffold(
+      backgroundColor: Colors.black,
+      body: SafeArea(
+        child: PluginsStoreView(
+          installedTitles: _installedPlugins.map((p) => p.title).toSet(),
+          onTogglePlugin: _togglePlugin,
+          onBack: _closePluginsStore,
+        ),
+      ),
+    );
+
+    final mainContent = _showPluginsStore ? pluginsStoreScaffold : chatScaffold;
+
+    if (!isWide) return mainContent;
 
     return Scaffold(
       backgroundColor: Colors.black,
       body: Row(
         children: [
           if (sidebarOpen) SizedBox(width: 260, child: SafeArea(child: sidebar)),
-          Expanded(child: chatScaffold),
+          Expanded(child: mainContent),
         ],
       ),
     );

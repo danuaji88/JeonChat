@@ -24,6 +24,11 @@ class JeonChatInputBar extends StatefulWidget {
   /// balas via TTS, karena butuh akses ke daftar pesan & API.
   final ValueChanged<String> onVoiceModeResult;
 
+  /// Jumlah plugin aktif — badge "✓N" cuma tampil kalau > 0. Tap badge
+  /// buka Plugin Store (lewat [onOpenPlugins]).
+  final int activePluginCount;
+  final VoidCallback? onOpenPlugins;
+
   const JeonChatInputBar({
     super.key,
     required this.quickReplies,
@@ -34,6 +39,8 @@ class JeonChatInputBar extends StatefulWidget {
     required this.onGenerateAudio,
     required this.onGenerateVideo,
     required this.onVoiceModeResult,
+    this.activePluginCount = 0,
+    this.onOpenPlugins,
   });
 
   @override
@@ -301,6 +308,11 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
       padding: const EdgeInsets.fromLTRB(12, 6, 12, 14),
       child: Column(
         children: [
+          if (widget.activePluginCount > 0)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Align(alignment: Alignment.centerLeft, child: _pluginBadge()),
+            ),
           if (widget.quickReplies.isNotEmpty)
             SizedBox(
               height: 34,
@@ -411,6 +423,21 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
       ),
     );
   }
+
+  Widget _pluginBadge() => InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: widget.onOpenPlugins,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+          decoration: BoxDecoration(
+            color: const Color(0x292ECC71),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: const Color(0xFF2ECC71)),
+          ),
+          child: Text('✓${widget.activePluginCount}',
+              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF2ECC71))),
+        ),
+      );
 
   Widget _modelDropdown() {
     return PopupMenuButton<String>(

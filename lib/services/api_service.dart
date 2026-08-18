@@ -43,7 +43,7 @@ class ApiService {
     return ApiService(
       baseUrl: prefs.getString(_prefsBaseUrlKey) ?? defaultBaseUrl,
       apiKey: prefs.getString(_prefsApiKeyKey) ?? 'jeongpt-demo',
-      sessionToken: prefs.getString(_prefsSessionTokenKey),
+      sessionToken: _decodeToken(prefs.getString(_prefsSessionTokenKey)),
       isGuest: prefs.getBool(_prefsGuestKey) ?? false,
     );
   }
@@ -54,9 +54,23 @@ class ApiService {
     await prefs.setString(_prefsApiKeyKey, apiKey);
     await prefs.setBool(_prefsGuestKey, isGuest);
     if (sessionToken != null && sessionToken!.isNotEmpty) {
-      await prefs.setString(_prefsSessionTokenKey, sessionToken!);
+      await prefs.setString(_prefsSessionTokenKey, _encodeToken(sessionToken!));
     } else {
       await prefs.remove(_prefsSessionTokenKey);
+    }
+  }
+
+  // Bukan enkripsi sungguhan (SharedPreferences di web = localStorage, tetap
+  // bisa dibaca lewat devtools) — cuma memastikan token tidak nangkring
+  // sebagai string plain text di storage, sesuai permintaan.
+  static String _encodeToken(String token) => base64Encode(utf8.encode(token));
+
+  static String? _decodeToken(String? encoded) {
+    if (encoded == null || encoded.isEmpty) return null;
+    try {
+      return utf8.decode(base64Decode(encoded));
+    } catch (_) {
+      return null; // Data lama sebelum encoding ini ada — anggap belum login.
     }
   }
 
@@ -89,6 +103,57 @@ class ApiService {
       throw ApiException('Login gagal: token tidak ditemukan pada respons server.');
     }
     sessionToken = token;
+    await saveToPrefs();
+    return token;
+  }
+
+  /// Login langsung pakai token JeonChat (didapat dari alur /register) —
+  /// diverifikasi ke /quota dulu sebelum disimpan sebagai sessionToken.
+  Future<void> loginWithToken(String token) async {
+    final trimmed = token.trim();
+    if (trimmed.isEmpty) {
+      throw ApiException('Token tidak boleh kosong.');
+    }
+    if (!isConfigured) {
+      throw ApiException('Base URL belum diatur.');
+    }
+    final res = await http
+        .get(_uri('/quota'), headers: {'Authorization': 'Bearer $trimmed'})
+        .timeout(_shortTimeout, onTimeout: () => throw ApiException('Timeout: server tidak merespons.'));
+    if (res.statusCode == 401) {
+      throw ApiException('Token tidak valid atau sudah kedaluwarsa.');
+    }
+    if (res.statusCode != 200) {
+      throw ApiException('Verifikasi token gagal (${res.statusCode}).');
+    }
+    sessionToken = trimmed;
+    isGuest = false;
+    await saveToPrefs();
+  }
+
+  Future<String> register({required String name, required String email, required String password}) async {
+    if (!isConfigured) {
+      throw ApiException('Base URL belum diatur.');
+    }
+    final res = await http
+        .post(
+          _uri('/auth/register'),
+          headers: const {'Content-Type': 'application/json'},
+          body: jsonEncode({'name': name, 'email': email, 'password': password}),
+        )
+        .timeout(_shortTimeout, onTimeout: () => throw ApiException('Timeout: server tidak merespons.'));
+    if (res.statusCode != 200 && res.statusCode != 201) {
+      throw ApiException('Daftar gagal (${res.statusCode}): ${res.body}');
+    }
+    final data = jsonDecode(res.body);
+    final token = (data is Map<String, dynamic>)
+        ? (data['token'] ?? data['session_token'] ?? data['access_token'])?.toString()
+        : null;
+    if (token == null || token.isEmpty) {
+      throw ApiException('Daftar berhasil, tapi token tidak ditemukan pada respons server. Silakan masuk manual.');
+    }
+    sessionToken = token;
+    isGuest = false;
     await saveToPrefs();
     return token;
   }
