@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/agent.dart';
 import '../models/message.dart';
 import '../services/api_service.dart';
+import '../services/chat_history_service.dart';
 import '../theme.dart';
 import '../widgets/agent_drawer.dart';
 import '../widgets/chat_bubble.dart';
@@ -61,11 +62,37 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   ];
 
   late List<ChatMessage> _messages = [];
+  String? _agentSession;
 
   @override
   void initState() {
     super.initState();
     _pulseController = AnimationController(vsync: this, duration: const Duration(seconds: 2))..repeat(reverse: true);
+    _loadHistory();
+  }
+
+  Future<void> _loadHistory() async {
+    final saved = await ChatHistoryService.load();
+    final savedSession = await ChatHistoryService.loadSession();
+    if (saved.isNotEmpty) {
+      setState(() {
+        _messages = saved;
+        _agentSession = savedSession;
+      });
+      _scrollToBottom();
+    }
+  }
+
+  Future<void> _saveHistory() async {
+    await ChatHistoryService.save(_messages, agentSession: _agentSession);
+  }
+
+  Future<void> _newChat() async {
+    await ChatHistoryService.clear();
+    setState(() {
+      _messages = [];
+      _agentSession = null;
+    });
   }
 
   @override
@@ -77,8 +104,6 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   }
 
   int get _runningCount => _agents.where((a) => a.status == AgentStatus.running).length;
-
-  String? _agentSession;
 
   Future<void> _send([String? preset]) async {
     final text = (preset ?? _controller.text).trim();
@@ -101,6 +126,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       setState(() {
         _messages = [..._messages, ChatMessage(isUser: false, text: result.content)];
       });
+      _saveHistory();
     } on AgentTimeoutException catch (e) {
       setState(() {
         _messages = [
@@ -108,6 +134,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
           ChatMessage(isUser: false, text: '⏳ ${e.toString()}'),
         ];
       });
+      _saveHistory();
     } catch (e) {
       // Fallback ke /chat kalau /agent gagal
       try {
@@ -118,6 +145,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
         setState(() {
           _messages = [..._messages, ChatMessage(isUser: false, text: reply)];
         });
+        _saveHistory();
       } catch (e2) {
         setState(() {
           _messages = [
@@ -125,6 +153,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
             ChatMessage(isUser: false, text: '⚠️ ${e2.toString()}'),
           ];
         });
+        _saveHistory();
       }
     } finally {
       setState(() => _sending = false);
@@ -195,6 +224,19 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
           ],
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.add_comment_outlined, size: 20, color: JeonColors.inkMuted),
+            tooltip: 'Chat Baru',
+            onPressed: () {
+              _newChat();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Chat baru dimulai'),
+                  duration: Duration(seconds: 1),
+                ),
+              );
+            },
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 12),
             child: Center(
@@ -241,14 +283,51 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       body: Column(
         children: [
           Expanded(
-            child: ListView.builder(
-              controller: _scrollController,
-              padding: const EdgeInsets.fromLTRB(14, 16, 14, 8),
-              itemCount: _messages.length,
-              itemBuilder: (context, i) => ChatBubble(message: _messages[i]),
-            ),
+            child: _messages.isEmpty
+                ? _welcomeScreen()
+                : ListView.builder(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.fromLTRB(14, 16, 14, 8),
+                    itemCount: _messages.length,
+                    itemBuilder: (context, i) => ChatBubble(message: _messages[i]),
+                  ),
           ),
           _composer(),
+        ],
+      ),
+    );
+  }
+
+  Widget _welcomeScreen() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 64,
+            height: 64,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [JeonColors.accent, JeonColors.accentDim],
+              ),
+              boxShadow: [BoxShadow(color: JeonColors.accentGlow, blurRadius: 20)],
+            ),
+            alignment: Alignment.center,
+            child: const Text('J',
+                style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 28,
+                    color: Color(0xFF04150A))),
+          ),
+          const SizedBox(height: 16),
+          const Text('Ada yang bisa saya bantu hari ini?',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: JeonColors.ink)),
+          const SizedBox(height: 8),
+          const Text('Ketik pesan atau pilih saran di bawah',
+              style: TextStyle(fontSize: 12.5, color: JeonColors.inkFaint)),
         ],
       ),
     );
