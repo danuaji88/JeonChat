@@ -25,7 +25,6 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateMixin {
   final _controller = TextEditingController();
   final _scrollController = ScrollController();
-  bool _sending = false;
   int _guestMessageCount = 0;
 
   late final AnimationController _pulseController;
@@ -133,12 +132,11 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
 
   Future<void> _send([String? preset]) async {
     final text = (preset ?? _controller.text).trim();
-    if (text.isEmpty || _sending) return;
+    if (text.isEmpty) return;
     setState(() {
       _messages = [..._messages, ChatMessage(isUser: true, text: text)];
-      _sending = true;
       _guestMessageCount++;
-      // Typing indicator
+      // Typing indicator — selalu tampil untuk setiap pesan baru
       _messages = [..._messages, ChatMessage(isUser: false, text: '⏳ AI sedang bekerja...')];
     });
     _controller.clear();
@@ -150,14 +148,39 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     final isImageRequest = lower.contains('buat gambar') || lower.contains('buat konten gambar') || lower.contains('generate gambar') || lower.contains('cari gambar');
     final isVideoRequest = lower.contains('buat video') || lower.contains('buat konten video') || lower.contains('cari video');
     final isAudioRequest = lower.contains('buat suara') || lower.contains('buat konten suara') || lower.contains('text to speech') || lower.contains('tts') || lower.contains('voice over');
+    final isCostRequest = lower.contains('cek biaya') || lower.contains('cek cost') || lower.contains('biaya') || lower.contains('harga');
 
     if (isImageRequest || isVideoRequest || isAudioRequest) {
       await _handleMediaRequest(text, isImageRequest, isVideoRequest, isAudioRequest);
       return;
     }
+    if (isCostRequest) {
+      await _handleCostRequest();
+      return;
+    }
 
     // ── Normal: agent / chat ──
     await _handleChatRequest(text);
+  }
+
+  Future<void> _handleCostRequest() async {
+    try {
+      final reply = await widget.api.sendChat(
+        history: _messages.where((m) => !m.text.startsWith('⏳')).toList(),
+        model: 'jeon-chat',
+      );
+      setState(() {
+        _messages = _messages.sublist(0, _messages.length - 1); // hapus typing
+        _messages = [..._messages, ChatMessage(isUser: false, text: reply)];
+      });
+      _saveHistory();
+    } catch (e) {
+      setState(() {
+        _messages = _messages.sublist(0, _messages.length - 1);
+        _messages = [..._messages, ChatMessage(isUser: false, text: '⚠️ Gagal cek biaya: $e')];
+      });
+      _saveHistory();
+    }
   }
 
   Future<void> _handleMediaRequest(String text, bool isImg, bool isVid, bool isAudio) async {
@@ -217,7 +240,6 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       _saveHistory();
       await _handleChatRequest(text);
     } finally {
-      setState(() => _sending = false);
       _scrollToBottom();
     }
   }
@@ -282,7 +304,6 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
         _saveHistory();
       }
     } finally {
-      setState(() => _sending = false);
       _scrollToBottom();
     }
   }
@@ -420,11 +441,8 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                 : ListView.builder(
                     controller: _scrollController,
                     padding: const EdgeInsets.fromLTRB(14, 16, 14, 8),
-                    itemCount: _messages.length + (_sending ? 1 : 0),
-                    itemBuilder: (context, i) {
-                      if (i == _messages.length) return const TypingIndicator();
-                      return ChatBubble(message: _messages[i]);
-                    },
+                    itemCount: _messages.length,
+                    itemBuilder: (context, i) => ChatBubble(message: _messages[i]),
                   ),
           ),
           _composer(),
@@ -534,14 +552,8 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                 Container(
                   decoration: const BoxDecoration(color: JeonColors.accent, shape: BoxShape.circle),
                   child: IconButton(
-                    icon: _sending
-                        ? const SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF04150A)),
-                          )
-                        : const Icon(Icons.send, size: 15, color: Color(0xFF04150A)),
-                    onPressed: _sending ? null : _send,
+                    icon: const Icon(Icons.send, size: 15, color: Color(0xFF04150A)),
+                    onPressed: _send,
                   ),
                 ),
               ],
