@@ -1,12 +1,16 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/message.dart';
+import 'api_service.dart';
 
 /// Simpan & muat percakapan multi-conversation ke SharedPreferences
-/// (localStorage di web). Tiap conversation:
+/// (localStorage di web) SEKALIGUS sinkron ke server via /history (kalau
+/// user login — lihat [enableServerSync]) supaya tidak hilang di
+/// incognito/pindah perangkat. localStorage tetap dipertahankan sebagai
+/// cache offline & sumber data untuk guest (belum login, /history butuh
+/// token). Tiap conversation:
 /// {id, title, messages, pinned, createdAt, updatedAt, agentSession}.
-/// Ini SATU-SATUNYA sumber daftar riwayat chat — backend tidak punya
-/// endpoint /chat/history yang berfungsi (dicek, hasilnya 404).
 class ChatHistoryService {
   static const _conversationsKey = 'jeon_chat_conversations';
   static const _projectsKey = 'jeon_chat_projects';
@@ -15,6 +19,84 @@ class ChatHistoryService {
   // migrasi satu-kali ke conversation pertama, lalu dihapus.
   static const _legacyKey = 'jeonchat_history';
   static const _legacySessionKey = 'jeonchat_agent_session';
+
+  // ---- Sinkronisasi server (/history) ----
+
+  /// Kalau true, [syncFromServer] & [pushToServer] beneran jalan — diaktifkan
+  /// sekali lewat [enableServerSync] saat user punya sesi login.
+  static bool _serverSyncEnabled = false;
+  static ApiService? _api;
+  static bool _syncing = false;
+  static Timer? _pushDebounce;
+
+  /// Aktifkan sinkronisasi server — dipanggil begitu ada sesi login (app
+  /// start dengan token tersimpan, atau baru saja login/register/social).
+  static void enableServerSync(ApiService api) {
+    _serverSyncEnabled = true;
+    _api = api;
+  }
+
+  /// Ambil conversations+projects dari server, merge dengan localStorage.
+  /// Strategi: server = sumber kebenaran utama untuk id yang sama. Kalau
+  /// server kosong tapi lokal ada (user lama/guest yang baru login),
+  /// migrasi: push lokal ke server. Kalau server ada isinya, conversation
+  /// lokal yang id-nya TIDAK ada di server tetap dipertahankan (mis. belum
+  /// sempat ke-push), digabung di depan lalu ditulis ulang ke localStorage
+  /// sebagai cache offline.
+  static Future<void> syncFromServer() async {
+    if (!_serverSyncEnabled || _api == null || _syncing) return;
+    _syncing = true;
+    try {
+      final remote = await _api!.getHistory();
+      if (remote == null) return;
+      final remoteConvs = (remote['conversations'] as List?)?.whereType<Map<String, dynamic>>().toList() ?? [];
+      final remoteProjects = (remote['projects'] as List?)?.whereType<Map<String, dynamic>>().toList() ?? [];
+
+      final prefs = await SharedPreferences.getInstance();
+      final localConvs = await _readConversations(prefs);
+
+      if (remoteConvs.isEmpty && localConvs.isNotEmpty) {
+        // Migrasi: lokal ada, server kosong → push lokal ke server.
+        await _pushToServer(localConvs, await _readProjects(prefs));
+        return;
+      }
+      if (remoteConvs.isNotEmpty) {
+        // Merge: server menang; tambahkan lokal yang id-nya tidak ada di server.
+        final remoteIds = remoteConvs.map((c) => c['id']).toSet();
+        final extraLocal = localConvs.where((c) => !remoteIds.contains(c['id'])).toList();
+        final merged = [...extraLocal, ...remoteConvs];
+        merged.sort((a, b) {
+          final pinnedA = a['pinned'] == true;
+          final pinnedB = b['pinned'] == true;
+          if (pinnedA != pinnedB) return pinnedA ? -1 : 1;
+          return ((b['updatedAt'] as int?) ?? 0).compareTo((a['updatedAt'] as int?) ?? 0);
+        });
+        await _writeConversations(prefs, merged);
+        await _writeProjects(prefs, remoteProjects);
+      }
+    } finally {
+      _syncing = false;
+    }
+  }
+
+  /// Push semua conversations+projects (dari localStorage saat ini) ke server.
+  static Future<void> pushToServer() async {
+    if (!_serverSyncEnabled || _api == null || _syncing) return;
+    _syncing = true;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final convs = await _readConversations(prefs);
+      final projs = await _readProjects(prefs);
+      await _pushToServer(convs, projs);
+    } finally {
+      _syncing = false;
+    }
+  }
+
+  static Future<void> _pushToServer(List<Map<String, dynamic>> convs, List<Map<String, dynamic>> projs) async {
+    if (_api == null) return;
+    await _api!.saveHistory(conversations: convs, projects: projs);
+  }
 
   static Future<List<Map<String, dynamic>>> _readConversations(SharedPreferences prefs) async {
     final raw = prefs.getString(_conversationsKey);
@@ -113,6 +195,7 @@ class ChatHistoryService {
       'projectId': projectId,
     });
     await _writeConversations(prefs, list);
+    await pushToServer();
     return id;
   }
 
@@ -164,6 +247,12 @@ class ChatHistoryService {
       list.insert(0, updated);
     }
     await _writeConversations(prefs, list);
+    // Debounce 2 detik — saveConversation() dipanggil sangat sering (tiap
+    // kirim pesan/balasan), jadi push langsung tiap kali akan bikin banyak
+    // POST kecil beruntun. Method tulis lain (rename/pin/delete/dst) jauh
+    // lebih jarang dipanggil sehingga tetap push langsung.
+    _pushDebounce?.cancel();
+    _pushDebounce = Timer(const Duration(seconds: 2), () => pushToServer());
   }
 
   /// Auto-title masih aktif kalau: conversation baru, field titleAuto=true
@@ -185,6 +274,7 @@ class ChatHistoryService {
     if (idx == -1) return;
     list[idx] = {...list[idx], 'projectId': projectId};
     await _writeConversations(prefs, list);
+    await pushToServer();
   }
 
   static Future<void> deleteConversation(String id) async {
@@ -192,6 +282,7 @@ class ChatHistoryService {
     final list = await _readConversations(prefs);
     list.removeWhere((c) => c['id'] == id);
     await _writeConversations(prefs, list);
+    await pushToServer();
   }
 
   /// Rename manual dari menu ⋯ → Rename — mematikan auto-title seterusnya
@@ -203,6 +294,7 @@ class ChatHistoryService {
     if (idx == -1) return;
     list[idx] = {...list[idx], 'title': title, 'titleAuto': false};
     await _writeConversations(prefs, list);
+    await pushToServer();
   }
 
   static Future<void> pinConversation(String id, bool pinned) async {
@@ -212,6 +304,7 @@ class ChatHistoryService {
     if (idx == -1) return;
     list[idx] = {...list[idx], 'pinned': pinned};
     await _writeConversations(prefs, list);
+    await pushToServer();
   }
 
   static Future<void> archiveConversation(String id, bool archived) async {
@@ -221,6 +314,7 @@ class ChatHistoryService {
     if (idx == -1) return;
     list[idx] = {...list[idx], 'archived': archived};
     await _writeConversations(prefs, list);
+    await pushToServer();
   }
 
   /// Judul otomatis dari pesan user PERTAMA — sekali terisi, judul tetap
@@ -314,6 +408,7 @@ class ChatHistoryService {
       'createdAt': now,
     });
     await _writeProjects(prefs, list);
+    await pushToServer();
     return id;
   }
 
@@ -324,6 +419,7 @@ class ChatHistoryService {
     if (idx == -1) return;
     list[idx] = {...list[idx], 'name': name};
     await _writeProjects(prefs, list);
+    await pushToServer();
   }
 
   /// Update lengkap dari halaman "Project settings" — nama, deskripsi, warna, ikon.
@@ -346,6 +442,7 @@ class ChatHistoryService {
       'icon': icon,
     };
     await _writeProjects(prefs, list);
+    await pushToServer();
   }
 
   static Future<void> pinProject(String id, bool pinned) async {
@@ -355,6 +452,7 @@ class ChatHistoryService {
     if (idx == -1) return;
     list[idx] = {...list[idx], 'pinned': pinned};
     await _writeProjects(prefs, list);
+    await pushToServer();
   }
 
   static Future<void> archiveProject(String id, bool archived) async {
@@ -364,6 +462,7 @@ class ChatHistoryService {
     if (idx == -1) return;
     list[idx] = {...list[idx], 'archived': archived};
     await _writeProjects(prefs, list);
+    await pushToServer();
   }
 
   /// Hapus project — chat yang tadinya masuk situ dilepas (projectId jadi null),
@@ -383,5 +482,6 @@ class ChatHistoryService {
       }
     }
     if (changed) await _writeConversations(prefs, conversations);
+    await pushToServer();
   }
 }

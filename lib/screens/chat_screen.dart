@@ -292,6 +292,14 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
   /// perbaiki dulu judul lama yang masih kepentok "Percakapan Baru" padahal
   /// sudah ada isi pesan (lihat ChatHistoryService.fixAllStaleTitles).
   Future<void> _loadConversations() async {
+    // App start (atau langsung setelah pushReplacement dari login) — kalau
+    // sudah ada sesi login, sinkron dulu ke server sebelum daftar percakapan
+    // dibaca, supaya sidebar langsung menampilkan riwayat dari akun (bukan
+    // cuma localStorage perangkat/browser ini — itu yang hilang di incognito).
+    if (widget.api.isLoggedIn) {
+      ChatHistoryService.enableServerSync(widget.api);
+      await ChatHistoryService.syncFromServer();
+    }
     await ChatHistoryService.fixAllStaleTitles();
     final projects = await ChatHistoryService.listProjects();
     final list = await ChatHistoryService.listConversations();
@@ -559,8 +567,21 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       setState(() {}); // refresh ikon gembok di sidebar
       _loadQuota();
       _loadUserSkillCount();
+      // Baru saja login DI TENGAH sesi (dari tamu) — beda dari app-start
+      // sync di _loadConversations(), JeonChatScreen ini tidak remount jadi
+      // history akun perlu ditarik & sidebar disegarkan manual di sini.
+      ChatHistoryService.enableServerSync(widget.api);
+      await ChatHistoryService.syncFromServer();
+      await _refreshConversationsList();
+      await _refreshProjects();
       onGranted();
     }
+  }
+
+  Future<void> _refreshConversationsList() async {
+    final list = await ChatHistoryService.listConversations();
+    if (!mounted) return;
+    setState(() => _conversations = list);
   }
 
   static const _thinkingText = 'JeonAI Sedang Berpikir Lalu Eksekusi Mohon Ditunggu';

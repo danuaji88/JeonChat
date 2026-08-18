@@ -348,6 +348,34 @@ class ApiService {
   /// cost_per_feature: {...}}}.
   Future<Map<String, dynamic>> getQuota() => _get('/quota');
 
+  /// Ambil history chat dari server (per user, via /history) — dipakai
+  /// ChatHistoryService buat sinkronisasi lintas perangkat/incognito.
+  /// Null kalau gagal/belum login (bukan error keras, caller anggap
+  /// "belum ada data server" dan tetap pakai localStorage).
+  Future<Map<String, dynamic>?> getHistory() async {
+    try {
+      return await _get('/history');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Simpan history chat ke server (per user, via /history).
+  Future<bool> saveHistory({
+    required List<Map<String, dynamic>> conversations,
+    required List<Map<String, dynamic>> projects,
+  }) async {
+    try {
+      await _post('/history', {
+        'conversations': conversations,
+        'projects': projects,
+      });
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Code Interpreter via /code.
   Future<Map<String, dynamic>> runCode(String code) =>
       _post('/code', {'code': code}, timeout: const Duration(seconds: 60));
