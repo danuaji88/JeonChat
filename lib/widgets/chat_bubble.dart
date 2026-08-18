@@ -120,6 +120,7 @@ class ChatBubble extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (message.docSource != null) _docSourceBadge(message.docSource!),
             if (media != null)
               media.isVideo ? _videoUrlPlaceholder(media.url) : _markdownImagePreview(media.url),
             SelectableText(
@@ -217,11 +218,24 @@ class ChatBubble extends StatelessWidget {
         child: Text(url, style: const TextStyle(fontSize: 11, color: JeonColors.inkMuted)),
       );
 
+  Widget _docSourceBadge(String docName) => Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: JeonColors.accentGlow,
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Text('Dari dokumen: $docName',
+              style: const TextStyle(fontSize: 10.5, color: JeonColors.accent, fontWeight: FontWeight.w600)),
+        ),
+      );
+
   Widget _imagePreview(String url) => RepaintBoundary(
         child: Padding(
           padding: const EdgeInsets.only(top: 8),
           child: ClipRRect(
-            borderRadius: BorderRadius.circular(JeonRadius.small),
+            borderRadius: BorderRadius.circular(12),
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxHeight: 320),
               child: Image.network(
@@ -349,8 +363,13 @@ class ChatBubble extends StatelessWidget {
     final title = (r['title'] ?? '').trim().isNotEmpty ? r['title']! : (r['url'] ?? 'Hasil');
     final url = r['url'] ?? '';
     final snippet = r['snippet'] ?? '';
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A2E),
+        borderRadius: BorderRadius.circular(8),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -359,20 +378,20 @@ class ChatBubble extends StatelessWidget {
             child: Text(title,
                 style: const TextStyle(
                     fontSize: 13,
-                    color: JeonColors.accent,
+                    color: JeonColors.ink,
                     decoration: TextDecoration.underline,
                     fontWeight: FontWeight.w600)),
           ),
           if (snippet.isNotEmpty) ...[
-            const SizedBox(height: 2),
+            const SizedBox(height: 3),
             Text(snippet, style: const TextStyle(fontSize: 11.5, color: JeonColors.inkMuted, height: 1.3)),
           ],
           if (url.isNotEmpty) ...[
-            const SizedBox(height: 2),
+            const SizedBox(height: 3),
             Text(url,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 10.5, color: JeonColors.inkFaint)),
+                style: const TextStyle(fontSize: 10.5, color: _analysisGreen)),
           ],
         ],
       ),

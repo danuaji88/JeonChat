@@ -251,12 +251,35 @@ class _SettingsCategoryScreenState extends State<_SettingsCategoryScreen> {
   }
 
   List<Map<String, dynamic>> _extractMemoryItems(Map<String, dynamic> data) {
-    final raw = data['items'] ?? data['memories'] ?? data['notes'] ?? data['facts'] ?? data['data'];
+    final notes = data['notes'] as List?;
+    final facts = data['facts'] as List?;
+    if (notes != null || facts != null) {
+      return [
+        ...(notes ?? []).map((e) => _normalizeMemoryItem(e, 'note')),
+        ...(facts ?? []).map((e) => _normalizeMemoryItem(e, 'fact')),
+      ];
+    }
+    final raw = data['items'] ?? data['memories'] ?? data['data'];
     if (raw is! List) return [];
-    return raw.map((e) {
-      if (e is Map) return Map<String, dynamic>.from(e);
-      return <String, dynamic>{'text': e.toString(), 'kind': 'note'};
-    }).toList();
+    return raw.map((e) => _normalizeMemoryItem(e, 'note')).toList();
+  }
+
+  Map<String, dynamic> _normalizeMemoryItem(dynamic e, String defaultKind) {
+    if (e is Map) {
+      final m = Map<String, dynamic>.from(e);
+      m['kind'] ??= defaultKind;
+      return m;
+    }
+    return {'text': e.toString(), 'kind': defaultKind};
+  }
+
+  String _timestampOf(Map<String, dynamic> item) {
+    final raw = item['timestamp'] ?? item['created_at'] ?? item['createdAt'] ?? item['time'];
+    if (raw == null) return '';
+    final ms = raw is int ? raw : int.tryParse(raw.toString());
+    if (ms == null) return raw.toString();
+    final date = DateTime.fromMillisecondsSinceEpoch(ms > 100000000000 ? ms : ms * 1000);
+    return '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
   }
 
   Future<void> _searchMemory(String query) async {
@@ -427,24 +450,7 @@ class _SettingsCategoryScreenState extends State<_SettingsCategoryScreen> {
     final isSearchMode = _memorySearchResults != null;
     return Column(
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-          child: SizedBox(
-            width: double.infinity,
-            height: 44,
-            child: ElevatedButton.icon(
-              onPressed: _addMemoryDialog,
-              icon: const Icon(Icons.add, size: 18, color: Color(0xFF04150A)),
-              label: const Text('Tambah Memory', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: JeonColors.accent,
-                foregroundColor: const Color(0xFF04150A),
-                elevation: 0,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(JeonRadius.pill)),
-              ),
-            ),
-          ),
-        ),
+        const SizedBox(height: 12),
         _memorySearchBar(),
         if (_memoryError != null)
           Padding(
@@ -490,6 +496,8 @@ class _SettingsCategoryScreenState extends State<_SettingsCategoryScreen> {
   Widget _memoryCard(Map<String, dynamic> item, {int? index}) {
     final kind = (item['kind'] ?? item['type'] ?? 'note').toString();
     final text = (item['text'] ?? item['content'] ?? item['value'] ?? '').toString();
+    final timestamp = _timestampOf(item);
+    final score = item['score'];
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -500,13 +508,34 @@ class _SettingsCategoryScreenState extends State<_SettingsCategoryScreen> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(color: JeonColors.accentGlow, borderRadius: BorderRadius.circular(6)),
-            child: Text(kind, style: const TextStyle(fontSize: 10, color: JeonColors.accent, fontWeight: FontWeight.w600)),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(color: JeonColors.accentGlow, borderRadius: BorderRadius.circular(6)),
+                      child: Text(kind,
+                          style: const TextStyle(fontSize: 10, color: JeonColors.accent, fontWeight: FontWeight.w600)),
+                    ),
+                    if (score != null) ...[
+                      const SizedBox(width: 6),
+                      Text('score: ${score is double ? score.toStringAsFixed(2) : score}',
+                          style: const TextStyle(fontSize: 10, color: JeonColors.inkFaint)),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(text, style: const TextStyle(fontSize: 13, color: JeonColors.ink, height: 1.4)),
+                if (timestamp.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(timestamp, style: const TextStyle(fontSize: 10, color: JeonColors.inkFaint)),
+                ],
+              ],
+            ),
           ),
-          const SizedBox(width: 10),
-          Expanded(child: Text(text, style: const TextStyle(fontSize: 13, color: JeonColors.ink, height: 1.4))),
           if (index != null)
             InkWell(
               onTap: () => _deleteMemory(kind, index),
@@ -524,6 +553,7 @@ class _SettingsCategoryScreenState extends State<_SettingsCategoryScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isMemory = widget.category == SettingsCategory.memory;
     return Scaffold(
       backgroundColor: JeonColors.bg,
       appBar: AppBar(
@@ -534,6 +564,14 @@ class _SettingsCategoryScreenState extends State<_SettingsCategoryScreen> {
       body: _settings == null
           ? const Center(child: CircularProgressIndicator(color: JeonColors.accent))
           : _content(),
+      floatingActionButton: isMemory
+          ? FloatingActionButton(
+              onPressed: _addMemoryDialog,
+              backgroundColor: JeonColors.accent,
+              foregroundColor: const Color(0xFF04150A),
+              child: const Icon(Icons.add),
+            )
+          : null,
     );
   }
 

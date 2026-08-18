@@ -55,6 +55,10 @@ class ChatMessage {
   /// {code, error} — dirender sebagai blok kode + output di chat_bubble.dart.
   final Map<String, String>? codeResult;
 
+  /// Nama dokumen sumber jawaban ini (dari askDoc()) — dirender sebagai
+  /// badge "Dari dokumen: X" di atas bubble kalau tidak null.
+  final String? docSource;
+
   const ChatMessage({
     required this.isUser,
     required this.text,
@@ -68,6 +72,7 @@ class ChatMessage {
     this.isAnalysis = false,
     this.searchResults,
     this.codeResult,
+    this.docSource,
   });
 
   /// Shape expected by the JEON backend: {role, content}.
@@ -90,6 +95,7 @@ class ChatMessage {
         if (isAnalysis) 'isAnalysis': isAnalysis,
         if (searchResults != null) 'searchResults': searchResults,
         if (codeResult != null) 'codeResult': codeResult,
+        if (docSource != null) 'docSource': docSource,
       };
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) => ChatMessage(
@@ -110,5 +116,6 @@ class ChatMessage {
             .map((e) => e.map((k, v) => MapEntry(k.toString(), v.toString())))
             .toList(),
         codeResult: (json['codeResult'] as Map?)?.map((k, v) => MapEntry(k.toString(), v.toString())),
+        docSource: json['docSource'] as String?,
       );
 }

@@ -5,6 +5,8 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:record/record.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 
 import '../services/api_service.dart' show ModelOption;
@@ -15,7 +17,6 @@ import '../theme.dart';
 /// hidup di sini; aksi yang perlu mengubah percakapan/panggil API dikirim
 /// balik ke parent lewat callback.
 class JeonChatInputBar extends StatefulWidget {
-  final List<String> quickReplies;
   final void Function(String text, String model) onSend;
   final ValueChanged<String> onGenerateImage;
   final ValueChanged<String> onSearchWeb;
@@ -51,9 +52,15 @@ class JeonChatInputBar extends StatefulWidget {
   /// biar bisa lewat auth gate dulu kayak Library/Plugins).
   final VoidCallback? onOpenCodeInterpreter;
 
+  /// Chip "Skills" — buka halaman Custom Skills (parent yang push, auth gate).
+  final VoidCallback? onOpenSkills;
+
+  /// Rekaman mic (base64, format PCM16) dikirim ke parent buat ditranskrip
+  /// lewat ApiService.speechToText() — hasilnya diisi balik ke text field.
+  final Future<String> Function(String base64Audio) onSpeechToText;
+
   const JeonChatInputBar({
     super.key,
-    required this.quickReplies,
     required this.onSend,
     required this.onGenerateImage,
     required this.onSearchWeb,
@@ -65,9 +72,11 @@ class JeonChatInputBar extends StatefulWidget {
     required this.onAnalyzeImage,
     required this.onWebSearch,
     required this.onUploadDoc,
+    required this.onSpeechToText,
     this.activePluginCount = 0,
     this.onOpenPlugins,
     this.onOpenCodeInterpreter,
+    this.onOpenSkills,
   });
 
   @override
@@ -75,17 +84,29 @@ class JeonChatInputBar extends StatefulWidget {
 }
 
 class _JeonChatInputBarState extends State<JeonChatInputBar> {
+  static const _selectedModelPrefsKey = 'selected_model';
+
   final _controller = TextEditingController();
   bool _hasText = false;
   ModelOption? _selectedModel;
+  String? _pendingSelectedValue;
 
   ModelOption get _selected =>
       _selectedModel ??
       widget.modelOptions.firstWhere((o) => o.label == 'High', orElse: () => widget.modelOptions.first);
 
+  // ---- Voice mode (🔵) — tetap dikte on-device (speech_to_text), tidak diubah. ----
   final SpeechToText _speech = SpeechToText();
   bool _speechAvailable = false;
   bool _isListening = false;
+
+  // ---- Tombol mic (dikte) — rekam via `record`, transkrip server-side
+  // lewat ApiService.speechToText() (STEP 3). ----
+  final AudioRecorder _audioRecorder = AudioRecorder();
+  StreamSubscription<Uint8List>? _recordSub;
+  final List<int> _recordedBytes = [];
+  bool _recording = false;
+  bool _sttLoading = false;
 
   @override
   void initState() {
@@ -95,6 +116,7 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
       if (has != _hasText) setState(() => _hasText = has);
     });
     _initSpeech();
+    _restoreSelectedModel();
   }
 
   Future<void> _initSpeech() async {
@@ -112,14 +134,44 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
       if (!mounted) return;
       setState(() => _speechAvailable = available);
     } catch (_) {
-      // Mic tidak tersedia/diizinkan — tombol mic otomatis nonaktif.
+      // Mic tidak tersedia/diizinkan — tombol voice mode otomatis nonaktif.
     }
+  }
+
+  Future<void> _restoreSelectedModel() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString(_selectedModelPrefsKey);
+    if (saved == null || !mounted) return;
+    _pendingSelectedValue = saved;
+    _applyPendingSelectedModel();
+  }
+
+  void _applyPendingSelectedModel() {
+    final pending = _pendingSelectedValue;
+    if (pending == null) return;
+    final match = widget.modelOptions.where((o) => o.value == pending);
+    if (match.isNotEmpty) {
+      setState(() {
+        _selectedModel = match.first;
+        _pendingSelectedValue = null;
+      });
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant JeonChatInputBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // modelOptions kadang baru siap (fetch dari /models) setelah initState —
+    // coba cocokkan lagi preferensi tersimpan begitu daftar model berubah.
+    if (_pendingSelectedValue != null) _applyPendingSelectedModel();
   }
 
   @override
   void dispose() {
     _controller.dispose();
     _speech.stop();
+    _recordSub?.cancel();
+    _audioRecorder.dispose();
     super.dispose();
   }
 
@@ -130,28 +182,65 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
     _controller.clear();
   }
 
+  /// Tap = mulai rekam, tap lagi = berhenti & transkrip via speechToText().
   Future<void> _toggleMic() async {
-    if (!_speechAvailable) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Mic tidak tersedia/diizinkan di browser ini')),
-      );
+    if (_sttLoading) return;
+    if (_recording) {
+      await _stopRecordingAndTranscribe();
       return;
     }
-    if (_isListening) {
-      await _speech.stop();
-      if (mounted) setState(() => _isListening = false);
-      return;
-    }
-    setState(() => _isListening = true);
-    await _speech.listen(
-      onResult: (result) {
+    await _startRecording();
+  }
+
+  Future<void> _startRecording() async {
+    try {
+      if (!await _audioRecorder.hasPermission()) {
         if (!mounted) return;
-        setState(() {
-          _controller.text = result.recognizedWords;
-          _controller.selection = TextSelection.collapsed(offset: _controller.text.length);
-        });
-      },
-    );
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Izin microphone ditolak/tidak tersedia')),
+        );
+        return;
+      }
+      _recordedBytes.clear();
+      final stream = await _audioRecorder.startStream(
+        const RecordConfig(encoder: AudioEncoder.pcm16bits, sampleRate: 16000, numChannels: 1),
+      );
+      _recordSub = stream.listen((chunk) => _recordedBytes.addAll(chunk));
+      if (!mounted) return;
+      setState(() => _recording = true);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Gagal mulai rekam: $e')));
+    }
+  }
+
+  Future<void> _stopRecordingAndTranscribe() async {
+    try {
+      await _audioRecorder.stop();
+    } catch (_) {
+      // Sudah berhenti/tidak sempat mulai — lanjut proses apa yang sudah terekam.
+    }
+    await _recordSub?.cancel();
+    _recordSub = null;
+    if (!mounted) return;
+    setState(() => _recording = false);
+    if (_recordedBytes.isEmpty) return;
+
+    setState(() => _sttLoading = true);
+    try {
+      final base64Audio = base64Encode(_recordedBytes);
+      final text = await widget.onSpeechToText(base64Audio);
+      if (!mounted) return;
+      if (text.trim().isNotEmpty) {
+        _controller.text = text.trim();
+        _controller.selection = TextSelection.collapsed(offset: _controller.text.length);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Gagal transkrip suara: $e')));
+    } finally {
+      if (mounted) setState(() => _sttLoading = false);
+    }
   }
 
   Future<void> _startVoiceMode() async {
@@ -181,24 +270,6 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
     final spoken = recognized.trim();
     if (spoken.isEmpty) return;
     widget.onVoiceModeResult(spoken);
-  }
-
-  /// "Tambah foto & file" — genuinely membuka picker (image_picker), tapi
-  /// backend tidak punya endpoint upload, jadi cuma bisa memilih, belum
-  /// bisa mengirim isi filenya.
-  Future<void> _pickPhoto() async {
-    try {
-      final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
-      if (picked == null || !mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Terpilih: ${picked.name} — upload file belum didukung backend saat ini')),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Gagal membuka pemilih foto: $e')),
-      );
-    }
   }
 
   /// Tombol ikon foto — pilih gambar, baca sebagai base64, kirim ke parent
@@ -237,8 +308,8 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
     }
   }
 
-  /// "Upload Dokumen" di menu "+" — baca isi file sebagai teks UTF-8 lalu
-  /// kirim ke parent buat di-upload via uploadDoc() (RAG).
+  /// "Upload Dokumen" — baca isi file sebagai teks UTF-8 lalu kirim ke
+  /// parent buat di-upload via uploadDoc() (RAG).
   Future<void> _uploadDocument() async {
     try {
       final result = await FilePicker.platform.pickFiles(type: FileType.any, withData: true);
@@ -301,7 +372,7 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
               textInputAction: TextInputAction.search,
               style: const TextStyle(fontSize: 13.4, color: JeonColors.ink),
               decoration: InputDecoration(
-                hintText: 'Mau cari apa?',
+                hintText: 'Cari di web...',
                 hintStyle: const TextStyle(color: JeonColors.inkFaint),
                 filled: true,
                 fillColor: JeonColors.surface2,
@@ -361,10 +432,6 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
               decoration: BoxDecoration(color: JeonColors.surface3, borderRadius: BorderRadius.circular(2)),
             ),
             const SizedBox(height: 6),
-            _plusMenuTile(Icons.add_photo_alternate_outlined, 'Tambah Foto & File', onTap: () {
-              Navigator.of(sheetContext).pop();
-              _pickPhoto();
-            }),
             _plusMenuTile(Icons.upload_file_outlined, 'Upload Dokumen', onTap: () {
               Navigator.of(sheetContext).pop();
               _uploadDocument();
@@ -486,32 +553,7 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
               padding: const EdgeInsets.only(bottom: 6),
               child: Align(alignment: Alignment.centerLeft, child: _pluginBadge()),
             ),
-          if (widget.quickReplies.isNotEmpty)
-            SizedBox(
-              height: 34,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 2),
-                itemCount: widget.quickReplies.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 8),
-                itemBuilder: (context, i) {
-                  final q = widget.quickReplies[i];
-                  return GestureDetector(
-                    onTap: () => _submit(q),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: JeonColors.surface2,
-                        border: Border.all(color: JeonColors.border),
-                        borderRadius: BorderRadius.circular(JeonRadius.pill),
-                      ),
-                      child: Text(q, style: const TextStyle(fontSize: 12, color: JeonColors.inkMuted)),
-                    ),
-                  );
-                },
-              ),
-            ),
+          _actionChips(),
           const SizedBox(height: 8),
           Container(
             padding: const EdgeInsets.fromLTRB(4, 4, 6, 4),
@@ -586,13 +628,19 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
                   )
                 else ...[
                   IconButton(
-                    icon: Icon(
-                      _isListening ? Icons.mic : Icons.mic_none_rounded,
-                      size: 19,
-                      color: _isListening ? JeonColors.accent : JeonColors.inkFaint,
-                    ),
-                    tooltip: 'Dikte suara',
-                    onPressed: _toggleMic,
+                    icon: _sttLoading
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: JeonColors.accent),
+                          )
+                        : Icon(
+                            _recording ? Icons.mic : Icons.mic_none_rounded,
+                            size: 19,
+                            color: _recording ? JeonColors.accent : JeonColors.inkFaint,
+                          ),
+                    tooltip: _recording ? 'Berhenti rekam' : 'Dikte suara (rekam)',
+                    onPressed: _sttLoading ? null : _toggleMic,
                   ),
                   Container(
                     margin: const EdgeInsets.only(left: 2),
@@ -611,6 +659,41 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
       ),
     );
   }
+
+  /// 5 chip aksi cepat (ganti chip teks lama) — masing-masing langsung
+  /// memicu fitur terkait, bukan sekadar isi teks ke chat.
+  Widget _actionChips() => SizedBox(
+        height: 34,
+        child: ListView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 2),
+          children: [
+            _actionChip('🖼️ Upload Gambar', _pickAndAnalyzeImage),
+            const SizedBox(width: 8),
+            _actionChip('🌐 Cari Web', _showWebSearchDialog),
+            const SizedBox(width: 8),
+            _actionChip('📄 Upload Dokumen', _uploadDocument),
+            const SizedBox(width: 8),
+            _actionChip('💻 Code', widget.onOpenCodeInterpreter),
+            const SizedBox(width: 8),
+            _actionChip('✨ Skills', widget.onOpenSkills),
+          ],
+        ),
+      );
+
+  Widget _actionChip(String label, VoidCallback? onTap) => GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: JeonColors.surface2,
+            border: Border.all(color: JeonColors.border),
+            borderRadius: BorderRadius.circular(JeonRadius.pill),
+          ),
+          child: Text(label, style: const TextStyle(fontSize: 12, color: JeonColors.inkMuted)),
+        ),
+      );
 
   Widget _pluginBadge() => InkWell(
         borderRadius: BorderRadius.circular(999),
@@ -637,7 +720,10 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
         borderRadius: BorderRadius.circular(JeonRadius.small),
         side: const BorderSide(color: JeonColors.border),
       ),
-      onSelected: (v) => setState(() => _selectedModel = v),
+      onSelected: (v) {
+        setState(() => _selectedModel = v);
+        SharedPreferences.getInstance().then((prefs) => prefs.setString(_selectedModelPrefsKey, v.value));
+      },
       itemBuilder: (context) => widget.modelOptions
           .map((o) => PopupMenuItem(
                 value: o,

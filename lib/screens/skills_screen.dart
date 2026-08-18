@@ -40,6 +40,15 @@ class _SkillsScreenState extends State<SkillsScreen> {
   String _nameOf(Map<String, dynamic> skill) => (skill['name'] ?? 'Skill').toString();
   String _descOf(Map<String, dynamic> skill) => (skill['description'] ?? skill['desc'] ?? '').toString();
 
+  String _timestampOf(Map<String, dynamic> skill) {
+    final raw = skill['created_at'] ?? skill['createdAt'] ?? skill['timestamp'] ?? skill['time'];
+    if (raw == null) return '';
+    final ms = raw is int ? raw : int.tryParse(raw.toString());
+    if (ms == null) return raw.toString();
+    final date = DateTime.fromMillisecondsSinceEpoch(ms > 100000000000 ? ms : ms * 1000);
+    return '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
+  }
+
   Future<void> _load() async {
     setState(() {
       _loading = true;
@@ -337,6 +346,7 @@ class _SkillsScreenState extends State<SkillsScreen> {
 
   Widget _skillCard(Map<String, dynamic> skill) {
     final desc = _descOf(skill);
+    final timestamp = _timestampOf(skill);
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(color: _pillBg, borderRadius: BorderRadius.circular(10)),
@@ -351,6 +361,10 @@ class _SkillsScreenState extends State<SkillsScreen> {
                 if (desc.isNotEmpty) ...[
                   const SizedBox(height: 3),
                   Text(desc, style: const TextStyle(fontSize: 12, color: _inkMuted, height: 1.3)),
+                ],
+                if (timestamp.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(timestamp, style: const TextStyle(fontSize: 10, color: _inkMuted)),
                 ],
               ],
             ),

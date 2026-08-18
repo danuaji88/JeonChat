@@ -51,7 +51,9 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
 
   // ---- Fitur AI: model dropdown + dokumen RAG ----
   List<ModelOption> _modelOptions = ApiService.fallbackModelOptions;
-  bool _hasActiveDocument = false;
+  // Nama dokumen yang lagi aktif (null = tidak ada) — dipakai buat routing
+  // pertanyaan ke askDoc() dan buat badge "Dari dokumen: X" di chat_bubble.
+  String? _activeDocName;
 
   // Deteksi file yang disebut agent (mis. "disimpan di /tmp/xxx.jpg") agar
   // bisa ditampilkan sebagai preview gambar/audio, bukan cuma teks path.
@@ -74,13 +76,6 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     }
     return ChatMessage(isUser: false, text: content, filePath: path);
   }
-
-  // ---- Quick replies (ala UI kit premium) ----
-  static const List<String> _quickReplies = [
-    'Buat konten gambar',
-    'Buat konten suara',
-    'Cek biaya',
-  ];
 
   // ---- Demo data (mirrors /opt/data/jeonchat_ui_mockup.html) ----
   final List<TaskItem> _tasks = const [
@@ -277,7 +272,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       _conversations = list;
       _messagesOpacity = 0.0;
       _showPluginsStore = false;
-      _hasActiveDocument = false;
+      _activeDocName = null;
     });
     _fadeInMessages();
   }
@@ -295,7 +290,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       _agentSession = conv['agentSession'] as String?;
       _messagesOpacity = 0.0;
       _showPluginsStore = false;
-      _hasActiveDocument = false;
+      _activeDocName = null;
     });
     _fadeInMessages();
     _scrollToBottom();
@@ -501,7 +496,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       await _handleCostRequest(model, typing);
       return;
     }
-    if (_hasActiveDocument) {
+    if (_activeDocName != null) {
       await _handleDocRequest(trimmed, typing);
       return;
     }
@@ -634,7 +629,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     try {
       final result = await widget.api.askDoc(query);
       final answer = (result['answer'] ?? result['content'] ?? '').toString();
-      _resolveTyping(typing, ChatMessage(isUser: false, text: answer));
+      _resolveTyping(typing, ChatMessage(isUser: false, text: answer, docSource: _activeDocName));
     } catch (e) {
       _resolveTyping(typing, ChatMessage(isUser: false, text: '⚠️ Gagal menjawab dari dokumen: $e'));
     }
@@ -692,7 +687,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     _scrollToBottom();
     try {
       await widget.api.uploadDoc(name, text);
-      _hasActiveDocument = true;
+      _activeDocName = name;
       _resolveTyping(
         typing,
         ChatMessage(
@@ -766,6 +761,13 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
 
   Future<void> _deepResearch(String topic) => _send('Lakukan riset mendalam tentang: $topic', 'jeon-chat');
 
+  /// Dipakai sidebar (nav "Skills") maupun chip "✨ Skills" di input bar.
+  void _openSkills() {
+    _requireAuth(() {
+      Navigator.of(context).push(MaterialPageRoute(builder: (_) => SkillsScreen(api: widget.api)));
+    });
+  }
+
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
@@ -832,16 +834,12 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       onOpenScheduled: () {
         if (!isWide) Navigator.of(context).maybePop();
         _requireAuth(() {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Scheduled segera hadir'), duration: Duration(seconds: 1)),
-          );
+          _openCodeInterpreter();
         });
       },
       onOpenMore: () {
         if (!isWide) Navigator.of(context).maybePop();
-        _requireAuth(() {
-          Navigator.of(context).push(MaterialPageRoute(builder: (_) => SkillsScreen(api: widget.api)));
-        });
+        _openSkills();
       },
       installedPlugins: _installedPlugins,
       onSelectPlugin: (title) {
@@ -967,7 +965,6 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
             ),
           ),
           JeonChatInputBar(
-            quickReplies: _quickReplies,
             onSend: _send,
             onGenerateImage: _generateImageDirect,
             onSearchWeb: _searchWeb,
@@ -993,6 +990,8 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
             onOpenCodeInterpreter: () => _requireAuth(() {
               _openCodeInterpreter();
             }),
+            onOpenSkills: _openSkills,
+            onSpeechToText: (base64Audio) => widget.api.speechToText(base64Audio),
           ),
         ],
       ),

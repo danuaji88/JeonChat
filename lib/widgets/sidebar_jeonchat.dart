@@ -149,7 +149,7 @@ class _JeonChatSidebarState extends State<JeonChatSidebar> {
           _modeToggle(),
           const SizedBox(height: 6),
           _navItem(Icons.auto_stories_outlined, 'Library', onTap: widget.onOpenLibrary, locked: !widget.api.isLoggedIn),
-          _navItem(Icons.schedule_outlined, 'Scheduled', onTap: widget.onOpenScheduled, locked: !widget.api.isLoggedIn),
+          _navItem(Icons.code_rounded, 'Code', onTap: widget.onOpenScheduled, locked: !widget.api.isLoggedIn),
           _navItem(Icons.extension_outlined, 'Plugins', onTap: widget.onOpenPlugins, locked: !widget.api.isLoggedIn),
           _navItem(Icons.auto_awesome_outlined, 'Skills', onTap: widget.onOpenMore, locked: !widget.api.isLoggedIn),
           if (widget.installedPlugins.isNotEmpty) ...[
