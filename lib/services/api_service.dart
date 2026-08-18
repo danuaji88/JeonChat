@@ -158,13 +158,32 @@ class ApiService {
     return token;
   }
 
-  /// Login sosial via /auth/social — [provider] = 'google'|'tiktok'|'facebook',
-  /// [token] = ID/access token dari SDK provider terkait.
-  Future<Map<String, dynamic>> socialLogin({required String provider, required String token}) async {
-    final res = await _post('/auth/social', {'provider': provider, 'token': token});
+  /// Login sosial via /auth/social — [provider] = 'google'|'tiktok'|'facebook'|
+  /// 'github'|'instagram', [token] = ID/access token dari SDK/flow provider terkait.
+  Future<Map<String, dynamic>> socialLogin({required String provider, required String token, String name = ''}) async {
+    final res = await _post('/auth/social', {'provider': provider, 'token': token, 'name': name});
     final sessionTok = (res['token'] ?? '').toString();
     if (sessionTok.isEmpty) {
       throw ApiException('Login gagal: token tidak ditemukan pada respons server.');
+    }
+    sessionToken = sessionTok;
+    isGuest = false;
+    await saveToPrefs();
+    return res;
+  }
+
+  /// Langkah 1 login WhatsApp/HP — minta OTP dikirim ke [phone]. Respons:
+  /// {ok, message, dev_hint, expires_in} — dev_hint = OTP sementara selama
+  /// belum ada gateway SMS/WA asli.
+  Future<Map<String, dynamic>> phoneRequestOtp(String phone) => _post('/auth/phone', {'phone': phone});
+
+  /// Langkah 2 — verifikasi OTP, sukses = sesi login tersimpan sama seperti
+  /// login sosial lain.
+  Future<Map<String, dynamic>> phoneVerifyOtp(String phone, String otp) async {
+    final res = await _post('/auth/phone/verify', {'phone': phone, 'otp': otp});
+    final sessionTok = (res['token'] ?? '').toString();
+    if (sessionTok.isEmpty) {
+      throw ApiException('Verifikasi OTP gagal: token tidak ditemukan pada respons server.');
     }
     sessionToken = sessionTok;
     isGuest = false;

@@ -4,15 +4,20 @@ import 'package:google_sign_in/google_sign_in.dart';
 import '../services/api_service.dart';
 import '../theme.dart';
 
-/// 3 tombol login sosial dipakai bareng oleh LoginScreen & AuthGateScreen —
-/// POST hasil token ke ApiService.socialLogin() (/auth/social).
+/// 6 tombol login sosial dipakai bareng oleh LoginScreen & AuthGateScreen —
+/// POST hasil token ke ApiService.socialLogin() (/auth/social) atau
+/// phoneRequestOtp/phoneVerifyOtp() (/auth/phone, /auth/phone/verify).
 ///
 /// Google beneran jalan lewat package google_sign_in (butuh Client ID resmi
 /// dikonfigurasi di project Google Cloud Console — di luar akses kode ini).
-/// TikTok & Facebook belum ada SDK yang bisa dipasang dengan aman tanpa App
-/// ID/Client ID asli (Facebook SDK khususnya bisa bikin build Android crash
-/// saat start kalau meta-data App ID tidak ada di AndroidManifest) — jadi
-/// tombolnya jujur menampilkan "belum dikonfigurasi", bukan pura-pura jalan.
+/// GitHub jalan lewat Personal Access Token manual (OAuth App penuh butuh
+/// Client ID/Secret server-side yang belum ada). WhatsApp jalan lewat alur
+/// OTP 2 langkah (/auth/phone → /auth/phone/verify, dev_hint dipakai selama
+/// belum ada gateway SMS/WA asli). TikTok, Facebook & Instagram belum ada
+/// SDK/App ID yang bisa dipasang dengan aman tanpa kredensial asli (Facebook
+/// SDK khususnya bisa bikin build Android crash saat start kalau meta-data
+/// App ID tidak ada di AndroidManifest) — jadi tombolnya jujur menampilkan
+/// "belum dikonfigurasi", bukan pura-pura jalan.
 class SocialLoginButtons extends StatefulWidget {
   final ApiService api;
   final VoidCallback onSuccess;
@@ -25,6 +30,7 @@ class SocialLoginButtons extends StatefulWidget {
 
 class _SocialLoginButtonsState extends State<SocialLoginButtons> {
   String? _loadingProvider;
+  String? _pressedProvider;
 
   bool get _loading => _loadingProvider != null;
 
@@ -39,7 +45,7 @@ class _SocialLoginButtonsState extends State<SocialLoginButtons> {
       if (idToken == null || idToken.isEmpty) {
         throw Exception('ID token Google tidak tersedia');
       }
-      await widget.api.socialLogin(provider: 'google', token: idToken);
+      await widget.api.socialLogin(provider: 'google', token: idToken, name: account.displayName ?? '');
       if (!mounted) return;
       widget.onSuccess();
     } catch (e) {
@@ -52,27 +58,235 @@ class _SocialLoginButtonsState extends State<SocialLoginButtons> {
     }
   }
 
-  void _showNotConfigured(String provider) {
+  Future<void> _loginWithGitHub() async {
+    setState(() => _loadingProvider = 'github');
+    try {
+      final tokenController = TextEditingController();
+      final token = await showDialog<String>(
+        context: context,
+        builder: (ctx) => _premiumDialog(
+          title: 'Masuk dengan GitHub',
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Masukkan GitHub Personal Access Token.',
+                  style: TextStyle(color: JeonColors.inkFaint, fontSize: 13, height: 1.4)),
+              const SizedBox(height: 4),
+              const Text('Buat di github.com/settings/tokens — scope: read:user, user:email',
+                  style: TextStyle(color: JeonColors.inkFaint, fontSize: 11, height: 1.4)),
+              const SizedBox(height: 12),
+              TextField(
+                controller: tokenController,
+                obscureText: true,
+                autofocus: true,
+                style: const TextStyle(color: JeonColors.ink, fontSize: 13.5),
+                decoration: _dialogFieldDecoration('ghp_...'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Batal', style: TextStyle(color: JeonColors.inkFaint)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(tokenController.text.trim()),
+              child: const Text('Masuk', style: TextStyle(color: JeonColors.accent, fontWeight: FontWeight.w600)),
+            ),
+          ],
+        ),
+      );
+      if (token == null || token.isEmpty || !mounted) return;
+      await widget.api.socialLogin(provider: 'github', token: token);
+      if (!mounted) return;
+      widget.onSuccess();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Login gagal, coba lagi.')),
+      );
+    } finally {
+      if (mounted) setState(() => _loadingProvider = null);
+    }
+  }
+
+  Future<void> _loginWithInstagram() async {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: JeonColors.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        title: Text('$provider belum tersedia', style: const TextStyle(color: JeonColors.ink, fontSize: 15.5)),
-        content: Text(
-          'Login $provider butuh App ID/Client ID resmi dari $provider yang belum dikonfigurasi di server ini. '
-          'Coba Google, atau masuk pakai email/password dulu ya.',
-          style: const TextStyle(color: JeonColors.inkFaint, fontSize: 12.8),
+      builder: (context) => _premiumDialog(
+        title: 'Instagram belum aktif',
+        content: const Text(
+          'Login Instagram butuh Instagram App ID yang didaftarkan di Meta Developer. Appa sedang menyiapkan. '
+          'Sementara pakai email/password, Google, atau WhatsApp dulu ya.',
+          style: TextStyle(color: JeonColors.inkFaint, fontSize: 13, height: 1.4),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Oke', style: TextStyle(color: JeonColors.accent)),
+            child: const Text('Oke', style: TextStyle(color: JeonColors.accent, fontWeight: FontWeight.w600)),
           ),
         ],
       ),
     );
   }
+
+  Future<void> _loginWithPhone() async {
+    final phoneController = TextEditingController();
+    final localPhone = await showDialog<String>(
+      context: context,
+      builder: (ctx) => _premiumDialog(
+        title: 'Masuk dengan WhatsApp',
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Masukkan nomor HP (WhatsApp) untuk menerima kode OTP.',
+                style: TextStyle(color: JeonColors.inkFaint, fontSize: 13, height: 1.4)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: phoneController,
+              keyboardType: TextInputType.phone,
+              autofocus: true,
+              style: const TextStyle(color: JeonColors.ink, fontSize: 13.5),
+              decoration: _dialogFieldDecoration('81234567890', prefixText: '+62 '),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Batal', style: TextStyle(color: JeonColors.inkFaint)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(phoneController.text.trim()),
+            child: const Text('Kirim OTP', style: TextStyle(color: JeonColors.accent, fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+    if (localPhone == null || localPhone.isEmpty || !mounted) return;
+    setState(() => _loadingProvider = 'phone');
+
+    try {
+      final digits = localPhone.startsWith('0') ? localPhone.substring(1) : localPhone;
+      final phone = '+62$digits';
+      final res = await widget.api.phoneRequestOtp(phone);
+      if (!mounted) return;
+      // dev_hint = OTP sementara (belum ada gateway SMS/WA asli).
+      // TODO: hapus dev_hint saat gateway WA/SMS aktif.
+      final devHint = res['dev_hint']?.toString() ?? '';
+
+      final otpController = TextEditingController();
+      final otp = await showDialog<String>(
+        context: context,
+        builder: (ctx) => _premiumDialog(
+          title: 'Masukkan Kode OTP',
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Kode dikirim ke $phone',
+                  style: const TextStyle(color: JeonColors.inkFaint, fontSize: 13, height: 1.4)),
+              if (devHint.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: JeonColors.ink.withValues(alpha: 0.06),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text('Mode dev: kode kamu $devHint',
+                      style: const TextStyle(color: JeonColors.inkFaint, fontSize: 11.5)),
+                ),
+              ],
+              const SizedBox(height: 12),
+              TextField(
+                controller: otpController,
+                keyboardType: TextInputType.number,
+                maxLength: 6,
+                autofocus: true,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    color: JeonColors.ink, fontSize: 22, letterSpacing: 8, fontWeight: FontWeight.bold),
+                decoration: _dialogFieldDecoration('••••••').copyWith(counterText: ''),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Batal', style: TextStyle(color: JeonColors.inkFaint)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(otpController.text.trim()),
+              child: const Text('Verifikasi', style: TextStyle(color: JeonColors.accent, fontWeight: FontWeight.w600)),
+            ),
+          ],
+        ),
+      );
+      if (otp == null || otp.isEmpty || !mounted) return;
+
+      await widget.api.phoneVerifyOtp(phone, otp);
+      if (!mounted) return;
+      widget.onSuccess();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString().contains('OTP') ? e.toString() : 'Login gagal, coba lagi.')),
+      );
+    } finally {
+      if (mounted) setState(() => _loadingProvider = null);
+    }
+  }
+
+  void _showNotConfigured(String provider) {
+    showDialog(
+      context: context,
+      builder: (context) => _premiumDialog(
+        title: '$provider belum tersedia',
+        content: Text(
+          'Login $provider butuh App ID/Client ID resmi dari $provider yang belum dikonfigurasi di server ini. '
+          'Coba Google, GitHub, atau WhatsApp dulu ya.',
+          style: const TextStyle(color: JeonColors.inkFaint, fontSize: 13, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Oke', style: TextStyle(color: JeonColors.accent, fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---- Dialog premium bersama: radius 16, shadow lembut, input filled
+  // radius 10 tanpa border, title 16/600, content 13 inkFaint. ----
+
+  Widget _premiumDialog({required String title, required Widget content, required List<Widget> actions}) {
+    return AlertDialog(
+      backgroundColor: JeonColors.surface,
+      shadowColor: Colors.black.withValues(alpha: 0.35),
+      elevation: 16,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      contentPadding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+      title: Text(title, style: const TextStyle(color: JeonColors.ink, fontSize: 16, fontWeight: FontWeight.w600)),
+      content: content,
+      actions: actions,
+    );
+  }
+
+  InputDecoration _dialogFieldDecoration(String hint, {String? prefixText}) => InputDecoration(
+        hintText: hint,
+        hintStyle: const TextStyle(color: JeonColors.inkFaint),
+        prefixText: prefixText,
+        prefixStyle: const TextStyle(color: JeonColors.ink, fontSize: 13.5),
+        filled: true,
+        fillColor: JeonColors.ink.withValues(alpha: 0.06),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -107,12 +321,49 @@ class _SocialLoginButtonsState extends State<SocialLoginButtons> {
           fg: Colors.white,
           border: const Color(0xFF1877F2),
           onTap: _loading ? null : () => _showNotConfigured('Facebook'),
-          leading: const Icon(Icons.facebook_rounded, size: 20, color: Colors.white),
+          leading: const Icon(Icons.facebook_rounded, size: 18, color: Colors.white),
+        ),
+        const SizedBox(height: 10),
+        _socialButton(
+          provider: 'github',
+          label: 'Masuk dengan GitHub',
+          bg: const Color(0xFF24292E),
+          fg: Colors.white,
+          border: const Color(0xFF24292E),
+          onTap: _loading ? null : _loginWithGitHub,
+          loading: _loadingProvider == 'github',
+          leading: const Icon(Icons.code_rounded, size: 18, color: Colors.white),
+        ),
+        const SizedBox(height: 10),
+        _socialButton(
+          provider: 'instagram',
+          label: 'Masuk dengan Instagram',
+          bg: const Color(0xFF833AB4),
+          bgGradient: const LinearGradient(colors: [Color(0xFF833AB4), Color(0xFFE1306C)]),
+          fg: Colors.white,
+          border: const Color(0xFFE1306C),
+          onTap: _loading ? null : _loginWithInstagram,
+          leading: const Icon(Icons.photo_camera_rounded, size: 18, color: Colors.white),
+        ),
+        const SizedBox(height: 10),
+        _socialButton(
+          provider: 'phone',
+          label: 'Masuk dengan WhatsApp',
+          bg: const Color(0xFF25D366),
+          fg: Colors.white,
+          border: const Color(0xFF25D366),
+          onTap: _loading ? null : _loginWithPhone,
+          loading: _loadingProvider == 'phone',
+          leading: const Icon(Icons.chat_rounded, size: 18, color: Colors.white),
         ),
       ],
     );
   }
 
+  /// Tombol sosial premium — tinggi 46, radius 12, border tipis 12% opacity,
+  /// shadow halus, micro-interaction scale 0.98 saat ditekan, loading state
+  /// pakai spinner 16px + label "Sebentar..." (tombol lain ikut disabled
+  /// lewat [_loading] di masing-masing onTap pemanggil).
   Widget _socialButton({
     required String provider,
     required String label,
@@ -121,27 +372,56 @@ class _SocialLoginButtonsState extends State<SocialLoginButtons> {
     required Color border,
     required VoidCallback? onTap,
     required Widget leading,
+    Gradient? bgGradient,
+    bool loading = false,
   }) {
-    final showSpinner = _loadingProvider == provider;
-    return SizedBox(
-      height: 46,
-      child: OutlinedButton(
-        onPressed: onTap,
-        style: OutlinedButton.styleFrom(
-          backgroundColor: bg,
-          side: BorderSide(color: border),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(JeonRadius.pill)),
+    final pressed = _pressedProvider == provider;
+    return AnimatedScale(
+      scale: pressed ? 0.98 : 1.0,
+      duration: const Duration(milliseconds: 100),
+      child: GestureDetector(
+        onTapDown: onTap == null ? null : (_) => setState(() => _pressedProvider = provider),
+        onTapUp: onTap == null ? null : (_) => setState(() => _pressedProvider = null),
+        onTapCancel: () => setState(() => _pressedProvider = null),
+        onTap: onTap,
+        child: Container(
+          width: double.infinity,
+          height: 46,
+          decoration: BoxDecoration(
+            color: bgGradient == null ? bg : null,
+            gradient: bgGradient,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: border.withValues(alpha: 0.12)),
+            boxShadow: [
+              BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 8, offset: const Offset(0, 2)),
+            ],
+          ),
+          child: Center(
+            child: loading
+                ? Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: fg)),
+                      const SizedBox(width: 10),
+                      Text('Sebentar...', style: TextStyle(color: fg, fontSize: 13.5, fontWeight: FontWeight.w600)),
+                    ],
+                  )
+                : Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      leading,
+                      const SizedBox(width: 10),
+                      Flexible(
+                        child: Text(
+                          label,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: fg, fontSize: 13.5, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
         ),
-        child: showSpinner
-            ? SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2.2, color: fg))
-            : Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  leading,
-                  const SizedBox(width: 10),
-                  Text(label, style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: fg)),
-                ],
-              ),
       ),
     );
   }

@@ -162,12 +162,13 @@ class _AuthGateScreenState extends State<AuthGateScreen> {
                   const SizedBox(height: 22),
                   Row(
                     children: [
-                      const Expanded(child: Divider(color: JeonColors.border)),
+                      const Expanded(child: Divider(color: JeonColors.inkFaint, thickness: 0.5)),
                       Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                        child: Text('atau', style: TextStyle(fontSize: 11.5, color: JeonColors.inkFaint)),
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        child: Text('atau',
+                            style: TextStyle(color: JeonColors.inkFaint, fontSize: 12, letterSpacing: 0.3)),
                       ),
-                      const Expanded(child: Divider(color: JeonColors.border)),
+                      const Expanded(child: Divider(color: JeonColors.inkFaint, thickness: 0.5)),
                     ],
                   ),
                   const SizedBox(height: 18),
