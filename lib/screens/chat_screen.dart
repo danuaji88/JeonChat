@@ -2,7 +2,6 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 
-import '../models/agent.dart';
 import '../models/message.dart';
 import '../services/api_service.dart';
 import '../services/chat_history_service.dart';
@@ -16,7 +15,6 @@ import 'plugins_screen.dart';
 import 'skill_list_screen.dart';
 import 'skills_screen.dart';
 import '../widgets/chat_bubble.dart';
-import '../widgets/context_sheet.dart';
 import '../widgets/input_bar.dart';
 import '../widgets/sidebar_jeonchat.dart';
 import '../widgets/upgrade_dialog.dart';
@@ -119,28 +117,6 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     return ChatMessage(
         isUser: false, text: content, filePath: path, pluginsUsed: pluginsUsed, autoLearnSkill: autoLearnSkill);
   }
-
-  // ---- Demo data (mirrors /opt/data/jeonchat_ui_mockup.html) ----
-  final List<TaskItem> _tasks = const [
-    TaskItem(text: 'Transkripsi video (large-v3)', sub: 'Selesai · 18.2s', done: true),
-    TaskItem(text: 'Deteksi momen viral', sub: '5 momen ditemukan', done: true),
-    TaskItem(text: 'Burn caption + filter', sub: 'Klip 3 dari 5', done: false),
-    TaskItem(text: 'Generate thumbnail', sub: 'Menunggu antrian', done: false),
-  ];
-
-  final List<KpiItem> _kpis = const [
-    KpiItem(value: 'Rp0', label: 'Sesi ini', accent: true),
-    KpiItem(value: '5', label: 'Klip diproses'),
-    KpiItem(value: '9.770', label: 'Kredit Kie.ai'),
-    KpiItem(value: '39', label: 'Model tersedia'),
-  ];
-
-  final List<IntegrationStatus> _integrations = const [
-    IntegrationStatus(name: 'Router jeon-9router', status: 'online', online: true),
-    IntegrationStatus(name: 'Telegram Gateway', status: 'online', online: true),
-    IntegrationStatus(name: 'ElevenLabs TTS', status: 'online', online: true),
-    IntegrationStatus(name: 'fal.ai', status: 'no key', online: false),
-  ];
 
   late List<ChatMessage> _messages = [];
   String? _agentSession;
@@ -1123,18 +1099,6 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
             },
           ),
         ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: JeonColors.surface2,
-        foregroundColor: JeonColors.accent,
-        elevation: 0,
-        onPressed: () => ContextSheet.show(
-          context,
-          tasks: _tasks,
-          kpis: _kpis,
-          integrations: _integrations,
-        ),
-        child: const Icon(Icons.dashboard_customize_outlined),
       ),
       body: Column(
         children: [
