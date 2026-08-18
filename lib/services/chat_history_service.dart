@@ -49,6 +49,7 @@ class ChatHistoryService {
       final conv = {
         'id': now.toString(),
         'title': await autoTitle(messages),
+        'titleAuto': true,
         'messages': rawMessages,
         'pinned': false,
         'createdAt': now,
@@ -102,6 +103,7 @@ class ChatHistoryService {
     list.insert(0, {
       'id': id,
       'title': 'Percakapan Baru',
+      'titleAuto': true,
       'messages': <Map<String, dynamic>>[],
       'pinned': false,
       'archived': false,
@@ -114,9 +116,11 @@ class ChatHistoryService {
     return id;
   }
 
-  /// Simpan pesan-pesan sebuah conversation. [title] dipaksa (rename manual);
-  /// kalau tidak diisi, judul lama dipertahankan, atau di-generate otomatis
-  /// dari pesan pertama kalau conversation ini baru.
+  /// Simpan pesan-pesan sebuah conversation. [title] dipaksa (rename manual,
+  /// mematikan auto-title seterusnya); kalau tidak diisi dan auto-title masih
+  /// aktif, judul di-generate ulang dari pesan user TERAKHIR tiap kali di-save
+  /// (dipanggil setelah user kirim pesan maupun setelah balasan AI datang) —
+  /// jadi judul ikut ter-update selama belum pernah di-rename manual.
   static Future<void> saveConversation(
     String id,
     List<ChatMessage> messages, {
@@ -128,10 +132,24 @@ class ChatHistoryService {
     final now = DateTime.now().millisecondsSinceEpoch;
     final idx = list.indexWhere((c) => c['id'] == id);
     final existing = idx != -1 ? list[idx] : null;
-    final resolvedTitle = title ?? (existing?['title'] as String?) ?? await autoTitle(messages);
+
+    String resolvedTitle;
+    bool resolvedTitleAuto;
+    if (title != null) {
+      resolvedTitle = title;
+      resolvedTitleAuto = false;
+    } else if (_isTitleAuto(existing)) {
+      resolvedTitle = await autoTitle(messages);
+      resolvedTitleAuto = true;
+    } else {
+      resolvedTitle = (existing?['title'] as String?) ?? await autoTitle(messages);
+      resolvedTitleAuto = false;
+    }
+
     final updated = {
       'id': id,
       'title': resolvedTitle,
+      'titleAuto': resolvedTitleAuto,
       'messages': messages.map((m) => m.toJson()).toList(),
       'pinned': existing?['pinned'] ?? false,
       'archived': existing?['archived'] ?? false,
@@ -146,6 +164,17 @@ class ChatHistoryService {
       list.insert(0, updated);
     }
     await _writeConversations(prefs, list);
+  }
+
+  /// Auto-title masih aktif kalau: conversation baru, field titleAuto=true
+  /// eksplisit, atau data lama (sebelum fitur ini ada) yang judulnya masih
+  /// placeholder default — supaya percakapan lama yang kepentok bug "selalu
+  /// Percakapan Baru" ikut kebenerin otomatis, tanpa menimpa judul yang
+  /// sudah pernah di-rename manual sebelumnya.
+  static bool _isTitleAuto(Map<String, dynamic>? existing) {
+    if (existing == null) return true;
+    if (existing.containsKey('titleAuto')) return existing['titleAuto'] == true;
+    return (existing['title'] as String?) == 'Percakapan Baru';
   }
 
   /// Pindahkan sebuah conversation ke project [projectId] (null = lepas dari project).
@@ -165,12 +194,14 @@ class ChatHistoryService {
     await _writeConversations(prefs, list);
   }
 
+  /// Rename manual dari menu ⋯ → Rename — mematikan auto-title seterusnya
+  /// biar tidak ketiban timpa lagi oleh saveConversation().
   static Future<void> renameConversation(String id, String title) async {
     final prefs = await SharedPreferences.getInstance();
     final list = await _readConversations(prefs);
     final idx = list.indexWhere((c) => c['id'] == id);
     if (idx == -1) return;
-    list[idx] = {...list[idx], 'title': title};
+    list[idx] = {...list[idx], 'title': title, 'titleAuto': false};
     await _writeConversations(prefs, list);
   }
 
@@ -192,13 +223,17 @@ class ChatHistoryService {
     await _writeConversations(prefs, list);
   }
 
-  /// Judul otomatis dari pesan pertama user, dipotong maksimal 40 karakter.
+  /// Judul otomatis dari pesan user TERAKHIR (bukan cuma pesan pertama) —
+  /// dipanggil ulang tiap saveConversation() selama auto-title masih aktif,
+  /// jadi ganti topik ikut kerekam. Huruf pertama dikapitalkan, dipotong
+  /// maksimal 40 karakter + "...". Tidak ada panggilan API — murni dari teks
+  /// pesan yang sudah ada.
   static Future<String> autoTitle(List<ChatMessage> messages) async {
-    final firstUser = messages.where((m) => m.isUser).toList();
-    if (firstUser.isEmpty) return 'Percakapan Baru';
-    final text = firstUser.first.text.trim();
-    if (text.isEmpty) return 'Percakapan Baru';
-    return text.length > 40 ? '${text.substring(0, 40)}…' : text;
+    final userTexts = messages.where((m) => m.isUser && m.text.trim().isNotEmpty).toList();
+    if (userTexts.isEmpty) return 'Percakapan Baru';
+    final text = userTexts.last.text.trim();
+    final capitalized = text[0].toUpperCase() + text.substring(1);
+    return capitalized.length > 40 ? '${capitalized.substring(0, 40)}...' : capitalized;
   }
 
   // ---- Projects ----
