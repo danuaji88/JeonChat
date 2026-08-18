@@ -1244,6 +1244,11 @@ class _JeonChatSidebarState extends State<JeonChatSidebar> {
   Widget _creditBadge() {
     final quota = widget.quota;
     if (quota == null) return const SizedBox.shrink();
+    final plan = (quota['plan'] ?? '').toString();
+    // Owner/master tanpa kuota — jangan tampilkan badge kredit
+    if (plan == 'master' || plan.isEmpty && (quota['message'] ?? '').toString().contains('Master')) {
+      return const SizedBox.shrink();
+    }
     final credits = quota['credits'] as Map<String, dynamic>? ?? {};
     final total = (credits['total'] as num?)?.toInt() ?? 0;
     final remaining = (credits['remaining'] as num?)?.toInt() ?? 0;
@@ -1292,6 +1297,44 @@ class _JeonChatSidebarState extends State<JeonChatSidebar> {
 
   void _showQuotaDetail(Map<String, dynamic> quota) {
     final plan = (quota['plan'] ?? 'free').toString();
+    // Owner/master tanpa kuota — tampilkan info full access, bukan kredit
+    if (plan == 'master') {
+      showModalBottomSheet(
+        context: context,
+        backgroundColor: const Color(0xFF171717),
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+        builder: (sheetContext) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 22, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.workspace_premium, size: 20, color: Color(0xFF3FB950)),
+                    const SizedBox(width: 8),
+                    Text('Plan: Master', style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w700, color: _ink)),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                const Text('Akses penuh tanpa batas kuota. Semua fitur tersedia.',
+                    style: TextStyle(fontSize: 13, color: _inkMuted)),
+                const SizedBox(height: 18),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: () => Navigator.of(sheetContext).pop(),
+                    child: const Text('Tutup', style: TextStyle(color: Color(0xFF3FB950), fontWeight: FontWeight.w600)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      return;
+    }
     final planLabel = plan.isEmpty ? plan : '${plan[0].toUpperCase()}${plan.substring(1)}';
     final credits = quota['credits'] as Map<String, dynamic>? ?? {};
     final total = (credits['total'] as num?)?.toInt() ?? 0;
