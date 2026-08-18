@@ -9,7 +9,7 @@ class JeonColors {
   static const border = Color(0xFF30363D);
   static const borderSoft = Color(0xFF21262D);
 
-  static const ink = Color(0xFFFFFFFF);
+  static const ink = Color(0xFFE6EDF3);
   static const inkMuted = Color(0xFF9B9B9B);
   static const inkFaint = Color(0xFF6E7681);
 

@@ -67,6 +67,7 @@ Future<void> showProfileMenu(
                 api: api,
                 profile: profile,
                 onClearHistory: onClearHistory,
+                onUserSkillsChanged: onProfileChanged,
               ),
             ));
           }),

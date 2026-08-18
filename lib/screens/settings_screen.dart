@@ -6,12 +6,14 @@ import '../services/settings_service.dart';
 import '../theme.dart';
 import 'login_screen.dart';
 import 'onboarding_profile_screen.dart';
+import 'skill_list_screen.dart';
 
 enum SettingsCategory {
   general,
   notifications,
   personalization,
   memory,
+  userSkills,
   plugins,
   voice,
   billing,
@@ -38,6 +40,8 @@ extension SettingsCategoryX on SettingsCategory {
         return Icons.auto_awesome_outlined;
       case SettingsCategory.memory:
         return Icons.psychology_outlined;
+      case SettingsCategory.userSkills:
+        return Icons.psychology_alt_outlined;
       case SettingsCategory.plugins:
         return Icons.extension_outlined;
       case SettingsCategory.voice:
@@ -77,6 +81,8 @@ extension SettingsCategoryX on SettingsCategory {
         return 'Personalization';
       case SettingsCategory.memory:
         return 'Memory';
+      case SettingsCategory.userSkills:
+        return 'Skill Saya';
       case SettingsCategory.plugins:
         return 'Plugins';
       case SettingsCategory.voice:
@@ -113,12 +119,17 @@ class SettingsScreen extends StatefulWidget {
   final SettingsCategory? initialCategory;
   final VoidCallback? onClearHistory;
 
+  /// Dipanggil setiap kali daftar "Skill Saya" berubah (tambah/hapus) —
+  /// dibubblekan sampai ke sidebar biar badge "🧠 N skill" ikut segar.
+  final VoidCallback? onUserSkillsChanged;
+
   const SettingsScreen({
     super.key,
     required this.api,
     required this.profile,
     this.initialCategory,
     this.onClearHistory,
+    this.onUserSkillsChanged,
   });
 
   @override
@@ -160,18 +171,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
         separatorBuilder: (_, __) => const Divider(color: JeonColors.borderSoft, height: 1, indent: 56),
         itemBuilder: (context, i) {
           final cat = SettingsCategory.values[i];
+          final isUserSkills = cat == SettingsCategory.userSkills;
           return ListTile(
-            leading: Icon(cat.icon, size: 19, color: JeonColors.inkMuted),
+            leading: isUserSkills
+                ? const Text('🧠', style: TextStyle(fontSize: 18))
+                : Icon(cat.icon, size: 19, color: JeonColors.inkMuted),
             title: Text(cat.label, style: const TextStyle(fontSize: 13.6, color: JeonColors.ink)),
+            subtitle: isUserSkills
+                ? const Text('Kemampuan yang AI pelajari dari kamu',
+                    style: TextStyle(fontSize: 10.5, color: JeonColors.inkFaint))
+                : null,
             trailing: const Icon(Icons.chevron_right, size: 18, color: JeonColors.inkFaint),
-            onTap: () => Navigator.of(context).push(MaterialPageRoute(
-              builder: (_) => _SettingsCategoryScreen(
-                category: cat,
-                api: widget.api,
-                profile: widget.profile,
-                onClearHistory: widget.onClearHistory,
-              ),
-            )),
+            onTap: () {
+              if (isUserSkills) {
+                Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => SkillListScreen(api: widget.api, onChanged: widget.onUserSkillsChanged),
+                ));
+                return;
+              }
+              Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => _SettingsCategoryScreen(
+                  category: cat,
+                  api: widget.api,
+                  profile: widget.profile,
+                  onClearHistory: widget.onClearHistory,
+                ),
+              ));
+            },
           );
         },
       ),

@@ -13,6 +13,7 @@ import 'auth_gate_screen.dart';
 import 'code_screen.dart';
 import 'library_screen.dart';
 import 'plugins_screen.dart';
+import 'skill_list_screen.dart';
 import 'skills_screen.dart';
 import '../widgets/chat_bubble.dart';
 import '../widgets/context_sheet.dart';
@@ -62,26 +63,61 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
   // ---- Dashboard kredit: GET /quota mentah, null = belum dimuat/guest. ----
   Map<String, dynamic>? _quota;
 
+  // ---- "Skill Saya" (/skill) — backend /agent otomatis menyuntikkan semua
+  // skill user ke setiap request, jadi di sini cuma perlu hitung jumlahnya
+  // buat badge sidebar. ----
+  int _userSkillCount = 0;
+
+  // Deteksi kalimat "ingat ini..." / "kalau saya minta X selalu Y" — kalau
+  // cocok, tawarkan simpan sebagai skill (opsional, tidak menghalangi alur
+  // kirim pesan normal).
+  static final _skillHintRegex = RegExp(
+    r'(ingat (ini|ya|bahwa)|tolong ingat|selalu (lakukan|jawab|balas|pakai))|kalau (saya|aku) minta.*selalu',
+    caseSensitive: false,
+  );
+
   // Deteksi file yang disebut agent (mis. "disimpan di /tmp/xxx.jpg") agar
   // bisa ditampilkan sebagai preview gambar/audio, bukan cuma teks path.
   static final _tmpFilePathRegex = RegExp(r'/tmp/[\w\-.]+\.\w+');
   static const _imageExtensions = {'.jpg', '.jpeg', '.png', '.gif', '.webp'};
   static const _audioExtensions = {'.mp3', '.wav', '.ogg', '.m4a', '.aac'};
 
-  ChatMessage _buildAgentMessage(String content, {List<String> pluginsUsed = const []}) {
+  // AutoLearn: backend menempel "\n\n🧠 [AutoLearn] Skill baru disimpan:
+  // 'nama-skill'" di ekor respons /agent begitu dia otomatis menyimpan
+  // skill baru — dilucuti dari teks balasan lalu dirender sebagai banner
+  // hijau terpisah (lihat ChatMessage.autoLearnSkill, chat_bubble.dart).
+  static final _autoLearnRegex =
+      RegExp(r"🧠\s*\[AutoLearn\]\s*Skill baru disimpan:\s*['“‘\x22]([^'”’\x22]+)['”’\x22]");
+
+  ({String text, String? autoLearnSkill}) _extractAutoLearn(String content) {
+    final match = _autoLearnRegex.firstMatch(content);
+    if (match == null) return (text: content, autoLearnSkill: null);
+    final cleanText = content.substring(0, match.start).trimRight();
+    return (text: cleanText, autoLearnSkill: match.group(1));
+  }
+
+  ChatMessage _buildAgentMessage(String rawContent, {List<String> pluginsUsed = const []}) {
+    final parsed = _extractAutoLearn(rawContent);
+    final content = parsed.text;
+    final autoLearnSkill = parsed.autoLearnSkill;
     final match = _tmpFilePathRegex.firstMatch(content);
-    if (match == null) return ChatMessage(isUser: false, text: content, pluginsUsed: pluginsUsed);
+    if (match == null) {
+      return ChatMessage(isUser: false, text: content, pluginsUsed: pluginsUsed, autoLearnSkill: autoLearnSkill);
+    }
     final path = match.group(0)!;
     final dot = path.lastIndexOf('.');
     final ext = dot == -1 ? '' : path.substring(dot).toLowerCase();
     final mediaUrl = '${widget.api.baseUrl}$path';
     if (_imageExtensions.contains(ext)) {
-      return ChatMessage(isUser: false, text: content, imageUrl: mediaUrl, pluginsUsed: pluginsUsed);
+      return ChatMessage(
+          isUser: false, text: content, imageUrl: mediaUrl, pluginsUsed: pluginsUsed, autoLearnSkill: autoLearnSkill);
     }
     if (_audioExtensions.contains(ext)) {
-      return ChatMessage(isUser: false, text: content, audioUrl: mediaUrl, pluginsUsed: pluginsUsed);
+      return ChatMessage(
+          isUser: false, text: content, audioUrl: mediaUrl, pluginsUsed: pluginsUsed, autoLearnSkill: autoLearnSkill);
     }
-    return ChatMessage(isUser: false, text: content, filePath: path, pluginsUsed: pluginsUsed);
+    return ChatMessage(
+        isUser: false, text: content, filePath: path, pluginsUsed: pluginsUsed, autoLearnSkill: autoLearnSkill);
   }
 
   // ---- Demo data (mirrors /opt/data/jeonchat_ui_mockup.html) ----
@@ -115,7 +151,66 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     _loadConversations();
     _loadInstalledPlugins();
     _loadModelOptions();
-    if (widget.api.isLoggedIn) _loadQuota();
+    if (widget.api.isLoggedIn) {
+      _loadQuota();
+      _loadUserSkillCount();
+    }
+  }
+
+  Future<void> _loadUserSkillCount() async {
+    if (!widget.api.isLoggedIn) return;
+    try {
+      final skills = await widget.api.listUserSkills();
+      if (!mounted) return;
+      setState(() => _userSkillCount = skills.length);
+    } catch (_) {
+      // Endpoint belum siap/gagal — badge cuma tidak tampil, bukan error keras.
+    }
+  }
+
+  /// "ingat ini..." / "kalau saya minta X selalu Y" → tawarkan simpan
+  /// sebagai skill personal. Fire-and-forget dari [_send] — dialog konfirmasi
+  /// tampil di atas alur kirim pesan normal, tidak menghalanginya.
+  Future<void> _maybeOfferSaveSkill(String text) async {
+    if (!widget.api.isLoggedIn || !_skillHintRegex.hasMatch(text)) return;
+    if (!mounted) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: JeonColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: const Text('Simpan sebagai skill?', style: TextStyle(color: JeonColors.ink, fontSize: 15.5)),
+        content: const Text(
+          'Sepertinya ini instruksi yang mau selalu kamu ingat. Simpan sebagai skill supaya JeonAI otomatis pakai ini di percakapan berikutnya?',
+          style: TextStyle(color: JeonColors.inkFaint, fontSize: 12.8),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Tidak', style: TextStyle(color: JeonColors.inkMuted))),
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Simpan', style: TextStyle(color: JeonColors.accent))),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final name = _autoSkillName(text);
+    try {
+      await widget.api.saveUserSkill(name, text);
+      await _loadUserSkillCount();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Skill "$name" tersimpan')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Gagal menyimpan skill: $e')));
+    }
+  }
+
+  String _autoSkillName(String text) {
+    final words = text.trim().split(RegExp(r'\s+')).take(5).join(' ');
+    final sanitized = words.replaceAll(RegExp(r'[^\w\s]'), '').trim();
+    return sanitized.isEmpty ? 'skill_${DateTime.now().millisecondsSinceEpoch}' : sanitized;
   }
 
   /// GET /quota — dipanggil sekali saat login, lalu disegarkan tiap kali
@@ -463,6 +558,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     if (granted == true) {
       setState(() {}); // refresh ikon gembok di sidebar
       _loadQuota();
+      _loadUserSkillCount();
       onGranted();
     }
   }
@@ -491,6 +587,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       }
     });
     _maybeSpeak(reply);
+    if (reply.autoLearnSkill != null) _loadUserSkillCount();
   }
 
   /// Riwayat buat dikirim ke /chat — buang semua bubble placeholder "Sedang
@@ -502,6 +599,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
   Future<void> _send(String text, String model) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
+    _maybeOfferSaveSkill(trimmed);
     final typing = ChatMessage(isUser: false, text: _thinkingText);
     setState(() {
       _messages = [..._messages, ChatMessage(isUser: true, text: trimmed), typing];
@@ -629,7 +727,8 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       // Agent timeout — auto-fallback ke /chat
       try {
         final reply = await widget.api.sendChat(history: _cleanHistory(), model: model);
-        _resolveTyping(typing, ChatMessage(isUser: false, text: reply));
+        final parsed = _extractAutoLearn(reply);
+        _resolveTyping(typing, ChatMessage(isUser: false, text: parsed.text, autoLearnSkill: parsed.autoLearnSkill));
         _saveHistory();
         _loadQuota();
       } catch (e2) {
@@ -640,7 +739,8 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       // Fallback ke /chat kalau /agent gagal
       try {
         final reply = await widget.api.sendChat(history: _cleanHistory(), model: model);
-        _resolveTyping(typing, ChatMessage(isUser: false, text: reply));
+        final parsed = _extractAutoLearn(reply);
+        _resolveTyping(typing, ChatMessage(isUser: false, text: parsed.text, autoLearnSkill: parsed.autoLearnSkill));
         _saveHistory();
         _loadQuota();
       } catch (e2) {
@@ -822,6 +922,15 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     });
   }
 
+  /// Dipakai badge "🧠 N" di sidebar dan tombol "Lihat" di banner AutoLearn.
+  void _openUserSkills() {
+    _requireAuth(() {
+      Navigator.of(context)
+          .push(MaterialPageRoute(builder: (_) => SkillListScreen(api: widget.api, onChanged: _loadUserSkillCount)))
+          .then((_) => _loadUserSkillCount());
+    });
+  }
+
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
@@ -874,7 +983,10 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       onArchiveProject: _archiveProject,
       onDeleteProject: _deleteProject,
       onClearHistory: _clearAllHistory,
-      onProfileChanged: () => setState(() {}),
+      onProfileChanged: () {
+        setState(() {});
+        _loadUserSkillCount();
+      },
       onOpenLibrary: () {
         if (!isWide) Navigator.of(context).maybePop();
         _requireAuth(() {
@@ -905,6 +1017,8 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       },
       onDeactivatePlugin: _deactivatePlugin,
       quota: _quota,
+      userSkillCount: _userSkillCount,
+      onOpenUserSkills: _openUserSkills,
     );
 
     final chatScaffold = Scaffold(
@@ -1015,7 +1129,8 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
                       padding: const EdgeInsets.fromLTRB(14, 16, 14, 8),
                       itemCount: _messages.length,
                       scrollCacheExtent: const ScrollCacheExtent.pixels(500),
-                      itemBuilder: (context, i) => ChatBubble(message: _messages[i]),
+                      itemBuilder: (context, i) =>
+                          ChatBubble(message: _messages[i], onViewAutoLearnSkill: _openUserSkills),
                     ),
             ),
           ),

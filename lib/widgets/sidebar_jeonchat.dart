@@ -37,6 +37,11 @@ class JeonChatSidebar extends StatefulWidget {
   /// cost_per_feature}}. Null = belum dimuat/user belum login (badge disembunyikan).
   final Map<String, dynamic>? quota;
 
+  /// Jumlah "Skill Saya" (/skill) aktif milik user — badge "🧠 N" di footer
+  /// profil, cuma tampil kalau > 0. Tap badge buka SkillListScreen.
+  final int userSkillCount;
+  final VoidCallback? onOpenUserSkills;
+
   // ---- Projects ----
   final List<Map<String, dynamic>> projects;
   final String? activeProjectId;
@@ -81,6 +86,8 @@ class JeonChatSidebar extends StatefulWidget {
     this.onSelectPlugin,
     this.onDeactivatePlugin,
     this.quota,
+    this.userSkillCount = 0,
+    this.onOpenUserSkills,
   });
 
   @override
@@ -1391,6 +1398,23 @@ class _JeonChatSidebarState extends State<JeonChatSidebar> {
                 ],
               ),
             ),
+            if (widget.userSkillCount > 0) ...[
+              InkWell(
+                borderRadius: BorderRadius.circular(999),
+                onTap: widget.onOpenUserSkills,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: const Color(0x29A371F7),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: const Color(0xFFA371F7)),
+                  ),
+                  child: Text('🧠 ${widget.userSkillCount}',
+                      style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Color(0xFFA371F7))),
+                ),
+              ),
+              const SizedBox(width: 8),
+            ],
             const Icon(Icons.settings_outlined, size: 16, color: _inkFaint),
           ],
         ),

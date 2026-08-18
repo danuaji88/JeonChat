@@ -333,6 +333,31 @@ class ApiService {
   Future<Map<String, dynamic>> runCode(String code) =>
       _post('/code', {'code': code}, timeout: const Duration(seconds: 60));
 
+  // ---- "Skill Saya" (pengetahuan/instruksi personal user) via /skill —
+  // beda dari Custom Skills /skills di bawah (skill workflow yang dijalankan
+  // manual lewat runSkill()). Skill di sini TIDAK dipilih manual — backend
+  // /agent otomatis menyuntikkannya ke setiap request untuk user itu. ----
+
+  Future<List<Map<String, dynamic>>> listUserSkills() async {
+    final res = await _post('/skill', {'action': 'list'});
+    final raw = res['skills'] ?? res['items'] ?? res['data'];
+    if (raw is! List) return [];
+    return raw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+  }
+
+  /// {name, slug, content, path} — respons GET action=get bungkus isinya
+  /// di bawah key 'skill'.
+  Future<Map<String, dynamic>> getUserSkill(String name) async {
+    final res = await _post('/skill', {'action': 'get', 'name': name});
+    final skill = res['skill'];
+    return skill is Map ? Map<String, dynamic>.from(skill) : res;
+  }
+
+  Future<void> saveUserSkill(String name, String content) =>
+      _post('/skill', {'action': 'save', 'name': name, 'content': content});
+
+  Future<void> deleteUserSkill(String name) => _post('/skill', {'action': 'delete', 'name': name});
+
   // ---- Custom Skills (CRUD) via /skills. ----
 
   Future<List<dynamic>> listSkills() async {

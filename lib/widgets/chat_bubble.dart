@@ -14,7 +14,11 @@ const _analysisGreen = Color(0xFF2ECC71);
 class ChatBubble extends StatelessWidget {
   final ChatMessage message;
 
-  const ChatBubble({super.key, required this.message});
+  /// Tombol "Lihat" di banner AutoLearn — buka SkillListScreen. Null kalau
+  /// pemanggil tidak menyediakan (banner tetap tampil, tombolnya disembunyikan).
+  final VoidCallback? onViewAutoLearnSkill;
+
+  const ChatBubble({super.key, required this.message, this.onViewAutoLearnSkill});
 
   // Deteksi URL media (gambar/video) yang disisipkan AI langsung di teks
   // balasan — baik lewat sintaks markdown image maupun URL polos.
@@ -94,7 +98,11 @@ class ChatBubble extends StatelessWidget {
     );
 
     final bubble = Flexible(
-      child: Container(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
         constraints: const BoxConstraints(maxWidth: 520),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
         decoration: BoxDecoration(
@@ -164,6 +172,9 @@ class ChatBubble extends StatelessWidget {
               ),
           ],
         ),
+          ),
+          if (message.autoLearnSkill != null) _autoLearnBanner(message.autoLearnSkill!),
+        ],
       ),
     );
 
@@ -437,6 +448,41 @@ class ChatBubble extends StatelessWidget {
       ),
     );
   }
+
+  Widget _autoLearnBanner(String skillName) => Container(
+        margin: const EdgeInsets.only(top: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: const Color(0xFF123524),
+          border: Border.all(color: _analysisGreen),
+          borderRadius: BorderRadius.circular(JeonRadius.small),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text("🧠 AutoLearn: Skill baru disimpan — '$skillName'",
+                  style: const TextStyle(
+                      fontSize: 11.5, color: _analysisGreen, fontWeight: FontWeight.w600, height: 1.3)),
+            ),
+            if (onViewAutoLearnSkill != null) ...[
+              const SizedBox(width: 8),
+              InkWell(
+                borderRadius: BorderRadius.circular(999),
+                onTap: onViewAutoLearnSkill,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: _analysisGreen),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: const Text('Lihat',
+                      style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: _analysisGreen)),
+                ),
+              ),
+            ],
+          ],
+        ),
+      );
 
   Widget _pluginsUsedBadge(List<String> ids) => Padding(
         padding: const EdgeInsets.only(top: 7),
