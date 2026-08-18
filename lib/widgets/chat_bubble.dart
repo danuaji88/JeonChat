@@ -43,6 +43,9 @@ class ChatBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final isUser = message.isUser;
     final isThinking = !isUser && message.text == _thinkingPlaceholder;
+    if (isThinking) {
+      return const _PremiumTypingBubble();
+    }
     final media = isUser ? null : _extractMediaUrl(message.text);
     // Kalau ada media, jangan tampilkan markdown/URL mentahnya lagi di teks —
     // gambarnya sudah dirender di atas, teks mentah cuma bikin duplikat.
@@ -109,30 +112,18 @@ class ChatBubble extends StatelessWidget {
           children: [
             if (media != null)
               media.isVideo ? _videoUrlPlaceholder(media.url) : _markdownImagePreview(media.url),
-            if (isThinking)
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: const [
-                  Flexible(
-                    child: Text('JeonAI Sedang Berpikir Lalu Eksekusi Mohon Ditunggu',
-                        style: TextStyle(fontSize: 13.4, color: JeonColors.ink, height: 1.4)),
-                  ),
-                  _ThinkingDots(),
-                ],
-              )
-            else
-              SelectableText(
-                cleanText,
-                style: TextStyle(
-                  fontSize: 13.4,
-                  color: isUser ? JeonColors.ink : JeonColors.ink,
-                  height: 1.4,
-                ),
-                toolbarOptions: const ToolbarOptions(
-                  copy: true,
-                  selectAll: true,
-                ),
+            SelectableText(
+              cleanText,
+              style: TextStyle(
+                fontSize: 13.4,
+                color: isUser ? JeonColors.ink : JeonColors.ink,
+                height: 1.4,
               ),
+              toolbarOptions: const ToolbarOptions(
+                copy: true,
+                selectAll: true,
+              ),
+            ),
             if (message.toolCall != null) ToolCardWidget(toolCall: message.toolCall!),
             if (message.imageUrl != null) _imagePreview(message.imageUrl!),
             if (message.audioUrl != null) AudioMessagePlayer(url: message.audioUrl!),
@@ -351,39 +342,128 @@ class ChatBubble extends StatelessWidget {
       );
 }
 
-/// Titik "..." yang berputar (".", "..", "...") tiap 500ms di belakang
-/// "AI sedang bekerja" — widget kecil sendiri biar animasinya tidak memicu
-/// rebuild seluruh ChatBubble.
-class _ThinkingDots extends StatefulWidget {
-  const _ThinkingDots();
+/// Typing indicator premium — avatar "J" hijau + bubble abu-abu dengan 3
+/// titik bouncing (delay 0.2s antar titik) dan label kecil di bawahnya.
+/// Widget sendiri (bukan bagian dalam ChatBubble) biar animasinya tidak
+/// memicu rebuild bubble-bubble lain, dan responsive lebar mobile/desktop.
+class _PremiumTypingBubble extends StatefulWidget {
+  const _PremiumTypingBubble();
 
   @override
-  State<_ThinkingDots> createState() => _ThinkingDotsState();
+  State<_PremiumTypingBubble> createState() => _PremiumTypingBubbleState();
 }
 
-class _ThinkingDotsState extends State<_ThinkingDots> {
-  static const _frames = ['.', '..', '...'];
-  int _frame = 0;
-  Timer? _timer;
+class _PremiumTypingBubbleState extends State<_PremiumTypingBubble> with TickerProviderStateMixin {
+  static const _dotCount = 3;
+  static const _bounceHeight = 5.0;
+
+  late final List<AnimationController> _controllers;
+  late final List<Animation<double>> _bounces;
 
   @override
   void initState() {
     super.initState();
-    _timer = Timer.periodic(const Duration(milliseconds: 500), (_) {
-      if (!mounted) return;
-      setState(() => _frame = (_frame + 1) % _frames.length);
-    });
+    _controllers = List.generate(
+      _dotCount,
+      (_) => AnimationController(vsync: this, duration: const Duration(milliseconds: 600)),
+    );
+    _bounces = _controllers
+        .map((c) => Tween<double>(begin: 0, end: -_bounceHeight)
+            .animate(CurvedAnimation(parent: c, curve: Curves.easeInOut)))
+        .toList();
+    for (var i = 0; i < _controllers.length; i++) {
+      Future.delayed(Duration(milliseconds: 200 * i), () {
+        if (mounted) _controllers[i].repeat(reverse: true);
+      });
+    }
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
+    for (final c in _controllers) {
+      c.dispose();
+    }
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Text(_frames[_frame], style: const TextStyle(fontSize: 13.4, color: JeonColors.ink, height: 1.4));
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isMobile = screenWidth < 600;
+    final horizontalPadding = isMobile ? 12.0 : 16.0;
+
+    final avatar = Container(
+      width: 28,
+      height: 28,
+      margin: const EdgeInsets.only(top: 2),
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [JeonColors.accent, JeonColors.accentDim],
+        ),
+        boxShadow: [BoxShadow(color: JeonColors.accentGlow, blurRadius: 8)],
+      ),
+      alignment: Alignment.center,
+      child: const Text('J',
+          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF04150A))),
+    );
+
+    final bubble = Flexible(
+      child: Container(
+        constraints: BoxConstraints(maxWidth: isMobile ? screenWidth * 0.85 : 520),
+        padding: EdgeInsets.symmetric(horizontal: horizontalPadding, vertical: horizontalPadding * 0.7),
+        decoration: BoxDecoration(
+          color: JeonColors.surface2,
+          border: Border.all(color: JeonColors.borderSoft),
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(JeonRadius.bubble),
+            topRight: Radius.circular(JeonRadius.bubble),
+            bottomLeft: Radius.circular(4),
+            bottomRight: Radius.circular(JeonRadius.bubble),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: List.generate(_dotCount, (i) {
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 3),
+                  child: AnimatedBuilder(
+                    animation: _bounces[i],
+                    builder: (context, child) => Transform.translate(
+                      offset: Offset(0, _bounces[i].value),
+                      child: child,
+                    ),
+                    child: Container(
+                      width: 7,
+                      height: 7,
+                      decoration: const BoxDecoration(shape: BoxShape.circle, color: JeonColors.accent),
+                    ),
+                  ),
+                );
+              }),
+            ),
+            const SizedBox(height: 6),
+            const Text('Sedang berpikir & mengeksekusi...',
+                style: TextStyle(fontSize: 11, color: JeonColors.inkFaint)),
+          ],
+        ),
+      ),
+    );
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [avatar, const SizedBox(width: 10), bubble],
+      ),
+    );
   }
 }
 
