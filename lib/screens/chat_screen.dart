@@ -9,6 +9,7 @@ import '../services/chat_history_service.dart';
 import '../services/profile_service.dart';
 import '../theme.dart';
 import 'library_screen.dart';
+import 'plugins_screen.dart';
 import '../widgets/chat_bubble.dart';
 import '../widgets/context_sheet.dart';
 import '../widgets/input_bar.dart';
@@ -658,6 +659,10 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       onOpenLibrary: () {
         if (!isWide) Navigator.of(context).maybePop();
         Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LibraryScreen()));
+      },
+      onOpenPlugins: () {
+        if (!isWide) Navigator.of(context).maybePop();
+        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PluginsScreen()));
       },
     );
 
