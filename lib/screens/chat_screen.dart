@@ -385,7 +385,8 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                   child: TextField(
                     controller: _controller,
                     minLines: 1,
-                    maxLines: 4,
+                    maxLines: 1,
+                    textInputAction: TextInputAction.send,
                     style: const TextStyle(fontSize: 13.4, color: JeonColors.ink),
                     decoration: const InputDecoration(
                       hintText: 'Tanya JeonChat apa saja…',
