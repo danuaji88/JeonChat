@@ -10,9 +10,35 @@ class ChatBubble extends StatelessWidget {
 
   const ChatBubble({super.key, required this.message});
 
+  // Deteksi URL media (gambar/video) yang disisipkan AI langsung di teks
+  // balasan — baik lewat sintaks markdown image maupun URL polos.
+  static final _markdownImageRegex = RegExp(r'!\[[^\]]*\]\(([^)]+)\)');
+  static final _directImageUrlRegex =
+      RegExp(r'https?://[^\s\)\]]+\.(jpg|jpeg|png|gif|webp)(\?[^\s]*)?', caseSensitive: false);
+  static final _directVideoUrlRegex =
+      RegExp(r'https?://[^\s\)\]]+\.(mp4|webm)(\?[^\s]*)?', caseSensitive: false);
+
+  ({String url, bool isVideo})? _extractMediaUrl(String text) {
+    final mdMatch = _markdownImageRegex.firstMatch(text);
+    if (mdMatch != null) {
+      final url = mdMatch.group(1)!.trim();
+      return (url: url, isVideo: _directVideoUrlRegex.hasMatch(url));
+    }
+    final imgMatch = _directImageUrlRegex.firstMatch(text);
+    if (imgMatch != null) {
+      return (url: imgMatch.group(0)!, isVideo: false);
+    }
+    final videoMatch = _directVideoUrlRegex.firstMatch(text);
+    if (videoMatch != null) {
+      return (url: videoMatch.group(0)!, isVideo: true);
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     final isUser = message.isUser;
+    final media = isUser ? null : _extractMediaUrl(message.text);
 
     final avatar = Container(
       width: 28,
@@ -69,6 +95,8 @@ class ChatBubble extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (media != null)
+              media.isVideo ? _videoUrlPlaceholder(media.url) : _markdownImagePreview(media.url),
             SelectableText(
               message.text,
               style: TextStyle(
@@ -119,6 +147,25 @@ class ChatBubble extends StatelessWidget {
       ),
     );
   }
+
+  Widget _markdownImagePreview(String url) => Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Image.network(
+            url,
+            fit: BoxFit.cover,
+            width: double.infinity,
+            errorBuilder: (c, e, s) =>
+                Text(url, style: const TextStyle(fontSize: 11, color: JeonColors.inkMuted)),
+          ),
+        ),
+      );
+
+  Widget _videoUrlPlaceholder(String url) => Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Text(url, style: const TextStyle(fontSize: 11, color: JeonColors.inkMuted)),
+      );
 
   Widget _imagePreview(String url) => Padding(
         padding: const EdgeInsets.only(top: 8),
