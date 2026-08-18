@@ -117,7 +117,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> with SingleTickerProvid
     await _send(spoken, 'jeon-chat');
 
     final lastReply = _messages.isNotEmpty && !_messages.last.isUser ? _messages.last.text : null;
-    if (lastReply == null || lastReply.isEmpty || lastReply.startsWith('⚠️') || lastReply.startsWith('⏳')) {
+    if (lastReply == null || lastReply.isEmpty || lastReply.startsWith('⚠️') || lastReply.startsWith('JeonAI Sedang')) {
       return;
     }
     try {
@@ -346,7 +346,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> with SingleTickerProvid
       _messages = [..._messages, ChatMessage(isUser: true, text: trimmed)];
       _guestMessageCount++;
       // Typing indicator — selalu tampil untuk setiap pesan baru
-      _messages = [..._messages, ChatMessage(isUser: false, text: '⏳ AI sedang bekerja...')];
+      _messages = [..._messages, ChatMessage(isUser: false, text: 'JeonAI Sedang Berpikir Lalu Eksekusi Mohon Ditunggu')];
     });
     _saveHistory();
     _scrollToBottom();
@@ -378,8 +378,8 @@ class _JeonChatScreenState extends State<JeonChatScreen> with SingleTickerProvid
   Future<void> _handleCostRequest(String model) async {
     try {
       final reply = await widget.api.sendChat(
-        history: _messages.where((m) => !m.text.startsWith('⏳')).toList(),
-        model: model,
+        history: _messages.where((m) => !m.text.startsWith('JeonAI Sedang') && !m.text.startsWith('⚠️')).toList(),
+        model: _selectedModel,
       );
       setState(() {
         _messages = _messages.sublist(0, _messages.length - 1); // hapus typing
@@ -474,8 +474,8 @@ class _JeonChatScreenState extends State<JeonChatScreen> with SingleTickerProvid
       // Agent timeout — auto-fallback ke /chat
       try {
         final reply = await widget.api.sendChat(
-          history: _messages.where((m) => !m.text.startsWith('⏳')).toList(),
-          model: model,
+          history: _messages.where((m) => !m.text.startsWith('JeonAI Sedang') && !m.text.startsWith('⚠️')).toList(),
+          model: _selectedModel,
         );
         setState(() {
           _messages = _messages.sublist(0, _messages.length - 1);
@@ -487,7 +487,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> with SingleTickerProvid
           _messages = _messages.sublist(0, _messages.length - 1);
           _messages = [
             ..._messages,
-            ChatMessage(isUser: false, text: '⏳ ${e.toString()}'),
+            ChatMessage(isUser: false, text: 'Maaf, koneksi lambat. Coba ulangi ya Appa 🙏'),
           ];
         });
         _saveHistory();
@@ -525,7 +525,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> with SingleTickerProvid
   Future<void> _generateImageDirect(String prompt) async {
     setState(() {
       _messages = [..._messages, ChatMessage(isUser: true, text: 'Buat gambar: $prompt')];
-      _messages = [..._messages, ChatMessage(isUser: false, text: '⏳ AI sedang bekerja...')];
+      _messages = [..._messages, ChatMessage(isUser: false, text: 'JeonAI Sedang Berpikir Lalu Eksekusi Mohon Ditunggu')];
     });
     _saveHistory();
     _scrollToBottom();
@@ -548,7 +548,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> with SingleTickerProvid
   Future<void> _generateAudioDirect(String text) async {
     setState(() {
       _messages = [..._messages, ChatMessage(isUser: true, text: 'Buat suara: $text')];
-      _messages = [..._messages, ChatMessage(isUser: false, text: '⏳ AI sedang bekerja...')];
+      _messages = [..._messages, ChatMessage(isUser: false, text: 'JeonAI Sedang Berpikir Lalu Eksekusi Mohon Ditunggu')];
     });
     _saveHistory();
     _scrollToBottom();
@@ -571,7 +571,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> with SingleTickerProvid
   Future<void> _generateVideoDirect(String prompt) async {
     setState(() {
       _messages = [..._messages, ChatMessage(isUser: true, text: 'Buat video: $prompt')];
-      _messages = [..._messages, ChatMessage(isUser: false, text: '⏳ AI sedang bekerja...')];
+      _messages = [..._messages, ChatMessage(isUser: false, text: 'JeonAI Sedang Berpikir Lalu Eksekusi Mohon Ditunggu')];
     });
     _saveHistory();
     _scrollToBottom();
