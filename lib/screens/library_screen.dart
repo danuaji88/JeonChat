@@ -1,4 +1,8 @@
+import 'dart:convert';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/message.dart';
 import '../services/chat_history_service.dart';
@@ -6,30 +10,47 @@ import '../widgets/audio_message_player.dart';
 
 enum LibraryFilter { all, images, documents }
 
-/// Satu entri media/file yang pernah muncul di sebuah percakapan —
-/// dikumpulkan dari imageUrl/videoUrl/audioUrl/filePath tiap ChatMessage.
+const _customItemsKey = 'jeon_library_custom_items';
+
+/// Satu entri di Library — bisa hasil auto-collect dari pesan chat
+/// (imageUrl/videoUrl/audioUrl/filePath, [id] null), atau item yang dibuat
+/// lewat tombol "New ▾" (note/document/spreadsheet/folder/upload, [id] terisi
+/// dan tersimpan di SharedPreferences).
 class LibraryItem {
+  final String? id;
   final String name;
-  final String type; // 'image' | 'video' | 'audio' | 'doc'
+  final String type; // image|video|audio|doc|note|document|spreadsheet|folder|upload
   final String url;
   final DateTime modified;
   final String size;
+  final String? content;
+  final String? parentId;
 
   const LibraryItem({
+    this.id,
     required this.name,
     required this.type,
     required this.url,
     required this.modified,
     required this.size,
+    this.content,
+    this.parentId,
   });
 
   bool get isVisual => type == 'image' || type == 'video';
+  bool get isCustom => id != null;
+  bool get isEditable => type == 'note' || type == 'document' || type == 'spreadsheet';
 }
 
 /// Halaman Library ala ChatGPT — daftar semua gambar/video/audio/file yang
-/// pernah di-generate atau dikirim di seluruh percakapan (ChatHistoryService).
+/// pernah di-generate/dikirim di chat, plus note/document/spreadsheet/folder/
+/// upload yang dibuat lewat tombol "New ▾" (tersimpan di SharedPreferences).
+/// [folderId]/[folderName] terisi saat sedang membuka isi sebuah folder.
 class LibraryScreen extends StatefulWidget {
-  const LibraryScreen({super.key});
+  final String? folderId;
+  final String? folderName;
+
+  const LibraryScreen({super.key, this.folderId, this.folderName});
 
   @override
   State<LibraryScreen> createState() => _LibraryScreenState();
@@ -50,6 +71,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   bool _loading = true;
   List<LibraryItem> _items = [];
+  List<Map<String, dynamic>> _customItems = [];
+  final Set<String> _fadeInIds = {};
   LibraryFilter _filter = LibraryFilter.all;
   final _searchController = TextEditingController();
   String _query = '';
@@ -77,6 +100,31 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final size = raw['size'];
     if (size is String && size.trim().isNotEmpty) return size;
     return '—';
+  }
+
+  String _formatBytes(int bytes) {
+    if (bytes <= 0) return '0 KB';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
+  // ---- Persistence: item custom (note/document/spreadsheet/folder/upload) ----
+
+  Future<List<Map<String, dynamic>>> _loadCustomItems() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_customItemsKey);
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      final decoded = jsonDecode(raw) as List;
+      return decoded.whereType<Map<String, dynamic>>().toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> _saveCustomItems(List<Map<String, dynamic>> items) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_customItemsKey, jsonEncode(items));
   }
 
   Future<void> _load() async {
@@ -129,18 +177,101 @@ class _LibraryScreenState extends State<LibraryScreen> {
         }
       }
     }
+
+    final customRaw = await _loadCustomItems();
+    for (final raw in customRaw) {
+      final createdAt = raw['createdAt'] as int?;
+      items.add(LibraryItem(
+        id: raw['id'] as String?,
+        name: (raw['name'] as String?) ?? 'Untitled',
+        type: (raw['type'] as String?) ?? 'document',
+        url: '',
+        modified: createdAt != null ? DateTime.fromMillisecondsSinceEpoch(createdAt) : DateTime.now(),
+        size: (raw['size'] as String?) ?? '0 KB',
+        content: raw['content'] as String?,
+        parentId: raw['parentId'] as String?,
+      ));
+    }
+
     items.sort((a, b) => b.modified.compareTo(a.modified));
     if (!mounted) return;
     setState(() {
       _items = items;
+      _customItems = customRaw;
       _loading = false;
+    });
+  }
+
+  Future<void> _addCustomItem({
+    required String id,
+    required String name,
+    required String type,
+    required String size,
+    String content = '',
+  }) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final entry = {
+      'id': id,
+      'name': name,
+      'type': type,
+      'createdAt': now,
+      'size': size,
+      'content': content,
+      'parentId': widget.folderId,
+    };
+    final updated = [..._customItems, entry];
+    await _saveCustomItems(updated);
+    if (!mounted) return;
+    setState(() {
+      _customItems = updated;
+      _items = [
+        LibraryItem(
+          id: id,
+          name: name,
+          type: type,
+          url: '',
+          modified: DateTime.fromMillisecondsSinceEpoch(now),
+          size: size,
+          content: content,
+          parentId: widget.folderId,
+        ),
+        ..._items,
+      ];
+      _fadeInIds.add(id);
+    });
+  }
+
+  Future<void> _saveItemContent(String id, String content) async {
+    final idx = _customItems.indexWhere((c) => c['id'] == id);
+    if (idx == -1) return;
+    final sizeLabel = _formatBytes(content.length);
+    final updated = [..._customItems];
+    updated[idx] = {...updated[idx], 'content': content, 'size': sizeLabel};
+    await _saveCustomItems(updated);
+    if (!mounted) return;
+    setState(() {
+      _customItems = updated;
+      _items = _items
+          .map((i) => i.id == id
+              ? LibraryItem(
+                  id: i.id,
+                  name: i.name,
+                  type: i.type,
+                  url: i.url,
+                  modified: DateTime.now(),
+                  size: sizeLabel,
+                  content: content,
+                  parentId: i.parentId,
+                )
+              : i)
+          .toList();
     });
   }
 
   String _fmtDate(DateTime d) => '${_monthNames[d.month - 1]} ${d.day}';
 
   List<LibraryItem> get _filtered {
-    var list = _items;
+    var list = _items.where((i) => i.parentId == widget.folderId).toList();
     switch (_filter) {
       case LibraryFilter.all:
         break;
@@ -192,7 +323,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
       tooltip: 'Kembali',
       onPressed: () => Navigator.of(context).maybePop(),
     );
-    const title = Text('Library', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: _ink));
+    final title = Text(widget.folderName ?? 'Library',
+        style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: _ink));
 
     if (isWide) {
       return Padding(
@@ -205,7 +337,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
             const Spacer(),
             SizedBox(width: 260, child: _searchBar()),
             const SizedBox(width: 12),
-            _newButton(),
+            _newButton(isWide),
           ],
         ),
       );
@@ -219,8 +351,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
             children: [
               backButton,
               const SizedBox(width: 2),
-              const Expanded(child: title),
-              _newButton(),
+              Expanded(child: title),
+              _newButton(isWide),
             ],
           ),
           const SizedBox(height: 10),
@@ -255,14 +387,33 @@ class _LibraryScreenState extends State<LibraryScreen> {
         ),
       );
 
-  Widget _newButton() => PopupMenuButton<String>(
-        color: _pillBg,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        onSelected: (_) => Navigator.of(context).maybePop(),
-        itemBuilder: (context) => const [
-          PopupMenuItem(value: 'chat', child: Text('New Chat', style: TextStyle(color: _ink))),
-          PopupMenuItem(value: 'image', child: Text('New Image', style: TextStyle(color: _ink))),
-          PopupMenuItem(value: 'audio', child: Text('New Audio', style: TextStyle(color: _ink))),
+  // ---- Tombol "New ▾" + dropdown ----
+
+  Widget _newButton(bool isWide) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final menuWidth = isWide ? 240.0 : (screenWidth - 32).clamp(200.0, screenWidth);
+
+    return Theme(
+      data: Theme.of(context).copyWith(
+        hoverColor: const Color(0xFF3A3A3A),
+        dividerColor: const Color(0xFF4A4A4A),
+        popupMenuTheme: const PopupMenuThemeData(
+          color: Color(0xFF2A2A2A),
+          menuPadding: EdgeInsets.all(8),
+        ),
+      ),
+      child: PopupMenuButton<String>(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        constraints: BoxConstraints(minWidth: 200, maxWidth: menuWidth),
+        onSelected: _handleNewMenuSelected,
+        itemBuilder: (context) => [
+          _menuItem('note', '📝', 'New Note'),
+          _menuItem('document', '📄', 'New Document'),
+          _menuItem('spreadsheet', '📊', 'New Spreadsheet'),
+          _menuItem('folder', '📁', 'New Folder'),
+          _menuItem('upload', '⬆️', 'Upload Files'),
+          const PopupMenuDivider(height: 9),
+          _menuItem('drive', '📂', 'Connect Google Drive'),
         ],
         child: Container(
           height: 38,
@@ -272,13 +423,139 @@ class _LibraryScreenState extends State<LibraryScreen> {
           child: const Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('New', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: Colors.black)),
+              Text('New', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: Colors.black)),
               SizedBox(width: 4),
               Icon(Icons.expand_more, size: 16, color: Colors.black),
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  PopupMenuItem<String> _menuItem(String value, String emoji, String label) => PopupMenuItem<String>(
+        value: value,
+        height: 40,
+        child: Row(
+          children: [
+            Text(emoji, style: const TextStyle(fontSize: 20)),
+            const SizedBox(width: 10),
+            Text(label, style: const TextStyle(fontSize: 14, color: _ink)),
+          ],
+        ),
       );
+
+  void _handleNewMenuSelected(String value) {
+    switch (value) {
+      case 'note':
+        _createTextItem('note', 'Untitled Note');
+        break;
+      case 'document':
+        _createTextItem('document', 'Untitled Document');
+        break;
+      case 'spreadsheet':
+        _createTextItem('spreadsheet', 'Untitled Spreadsheet');
+        break;
+      case 'folder':
+        _createFolderDialog();
+        break;
+      case 'upload':
+        _uploadFiles();
+        break;
+      case 'drive':
+        _showComingSoon('Connect Google Drive');
+        break;
+    }
+  }
+
+  Future<void> _createTextItem(String type, String baseName) => _addCustomItem(
+        id: 'lib_${DateTime.now().millisecondsSinceEpoch}',
+        name: baseName,
+        type: type,
+        size: '0 KB',
+      );
+
+  Future<void> _createFolderDialog() async {
+    final controller = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF171717),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: const Text('Folder baru', style: TextStyle(color: _ink, fontSize: 15.5)),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: const TextStyle(color: _ink, fontSize: 13.5),
+          decoration: InputDecoration(
+            hintText: 'Nama folder',
+            hintStyle: const TextStyle(color: _inkMuted),
+            filled: true,
+            fillColor: const Color(0xFF262626),
+            isDense: true,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+          ),
+          onSubmitted: (v) => Navigator.of(context).pop(v),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Batal', style: TextStyle(color: _inkMuted)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+            child: const Text('Buat', style: TextStyle(color: _ink)),
+          ),
+        ],
+      ),
+    );
+    if (name == null || name.isEmpty) return;
+    await _addCustomItem(
+      id: 'lib_${DateTime.now().millisecondsSinceEpoch}',
+      name: name,
+      type: 'folder',
+      size: '—',
+    );
+  }
+
+  Future<void> _uploadFiles() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(type: FileType.any, allowMultiple: true);
+      if (result == null) return;
+      for (final file in result.files) {
+        await _addCustomItem(
+          id: 'lib_${DateTime.now().millisecondsSinceEpoch}_${file.name}',
+          name: file.name,
+          type: 'upload',
+          size: _formatBytes(file.size),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Gagal upload file: $e')),
+      );
+    }
+  }
+
+  void _showComingSoon(String feature) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF171717),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: Text(feature, style: const TextStyle(color: _ink, fontSize: 15.5)),
+        content: const Text('Fitur segera hadir.', style: TextStyle(color: _inkMuted, fontSize: 13)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Oke', style: TextStyle(color: _ink)),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _filterTabs() => Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -313,10 +590,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
           children: [
             const Icon(Icons.folder_outlined, size: 64, color: _inkMuted),
             const SizedBox(height: 14),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 32),
-              child: Text('Belum ada file. Buat gambar/video/suara di chat dulu.',
-                  textAlign: TextAlign.center, style: TextStyle(fontSize: 13.5, color: _inkMuted)),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: Text(
+                widget.folderId != null
+                    ? 'Folder ini masih kosong.'
+                    : 'Belum ada file. Buat gambar/video/suara di chat dulu.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 13.5, color: _inkMuted),
+              ),
             ),
           ],
         ),
@@ -355,32 +637,38 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
-  Widget _row(LibraryItem item, bool isWide) => InkWell(
-        onTap: () => _openItem(item),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Row(
-            children: [
-              _thumbnail(item),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(item.name,
-                    maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14, color: _ink)),
-              ),
-              if (isWide)
-                SizedBox(
-                  width: 90,
-                  child: Text(_fmtDate(item.modified), style: const TextStyle(fontSize: 12, color: _inkMuted)),
-                ),
+  Widget _row(LibraryItem item, bool isWide) {
+    final content = InkWell(
+      onTap: () => _openItem(item),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
+          children: [
+            _thumbnail(item),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(item.name,
+                  maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14, color: _ink)),
+            ),
+            if (isWide)
               SizedBox(
-                width: 70,
-                child:
-                    Text(item.size, textAlign: TextAlign.end, style: const TextStyle(fontSize: 12, color: _inkMuted)),
+                width: 90,
+                child: Text(_fmtDate(item.modified), style: const TextStyle(fontSize: 12, color: _inkMuted)),
               ),
-            ],
-          ),
+            SizedBox(
+              width: 70,
+              child:
+                  Text(item.size, textAlign: TextAlign.end, style: const TextStyle(fontSize: 12, color: _inkMuted)),
+            ),
+          ],
         ),
-      );
+      ),
+    );
+    if (item.id != null && _fadeInIds.contains(item.id)) {
+      return _FadeIn(key: ValueKey('fade_${item.id}'), child: content);
+    }
+    return KeyedSubtree(key: ValueKey(item.id ?? '${item.type}_${item.url}_${item.modified.millisecondsSinceEpoch}'), child: content);
+  }
 
   Widget _thumbnail(LibraryItem item) {
     if (item.type == 'image') {
@@ -397,6 +685,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
     }
     if (item.type == 'video') return _iconBox(Icons.movie_outlined, _boxGrey);
     if (item.type == 'audio') return _iconBox(Icons.music_note, _boxBlue);
+    if (item.type == 'note') return _iconBox(Icons.sticky_note_2_outlined, _boxGrey);
+    if (item.type == 'document') return _iconBox(Icons.description_outlined, _boxGrey);
+    if (item.type == 'spreadsheet') return _iconBox(Icons.grid_on_outlined, const Color(0xFF2E7D32));
+    if (item.type == 'folder') return _iconBox(Icons.folder_outlined, const Color(0xFFF5B93D));
+    if (item.type == 'upload') return _iconBox(Icons.upload_file_outlined, _boxGrey);
     return _iconBox(Icons.insert_drive_file_outlined, _boxGrey);
   }
 
@@ -419,9 +712,37 @@ class _LibraryScreenState extends State<LibraryScreen> {
       case 'video':
         _openInfo(item, 'Video tersimpan di server. Link untuk menonton:');
         break;
+      case 'note':
+      case 'document':
+      case 'spreadsheet':
+        _openEditor(item);
+        break;
+      case 'folder':
+        _openFolder(item);
+        break;
+      case 'upload':
+        _openInfo(item, 'File yang di-upload (referensi lokal, belum ada penyimpanan cloud):');
+        break;
       default:
         _openInfo(item, 'File tersimpan di server:');
     }
+  }
+
+  Future<void> _openEditor(LibraryItem item) async {
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => _LibraryEditorScreen(
+        name: item.name,
+        type: item.type,
+        content: item.content ?? '',
+        onSave: (newContent) => _saveItemContent(item.id!, newContent),
+      ),
+    ));
+  }
+
+  void _openFolder(LibraryItem item) {
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => LibraryScreen(folderId: item.id, folderName: item.name),
+    ));
   }
 
   void _openImage(LibraryItem item) {
@@ -497,7 +818,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
             children: [
               Text(label, style: const TextStyle(color: _inkMuted, fontSize: 12.5)),
               const SizedBox(height: 8),
-              SelectableText(item.url, style: const TextStyle(color: _ink, fontSize: 12.8)),
+              SelectableText(item.url.isEmpty ? item.name : item.url,
+                  style: const TextStyle(color: _ink, fontSize: 12.8)),
             ],
           ),
         ),
@@ -507,6 +829,108 @@ class _LibraryScreenState extends State<LibraryScreen> {
             child: const Text('Tutup', style: TextStyle(color: _inkMuted)),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Fade-in 200ms sekali jalan — dipakai buat item Library yang baru saja
+/// dibuat lewat tombol "New ▾", supaya kemunculannya di list terasa halus.
+class _FadeIn extends StatefulWidget {
+  final Widget child;
+  const _FadeIn({super.key, required this.child});
+
+  @override
+  State<_FadeIn> createState() => _FadeInState();
+}
+
+class _FadeInState extends State<_FadeIn> with SingleTickerProviderStateMixin {
+  late final AnimationController _controller =
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 200))..forward();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => FadeTransition(opacity: _controller, child: widget.child);
+}
+
+/// Editor sederhana untuk note/document/spreadsheet Library — satu TextField
+/// multiline, tombol Save di AppBar. Spreadsheet diedit sebagai teks CSV.
+class _LibraryEditorScreen extends StatefulWidget {
+  final String name;
+  final String type;
+  final String content;
+  final ValueChanged<String> onSave;
+
+  const _LibraryEditorScreen({
+    required this.name,
+    required this.type,
+    required this.content,
+    required this.onSave,
+  });
+
+  @override
+  State<_LibraryEditorScreen> createState() => _LibraryEditorScreenState();
+}
+
+class _LibraryEditorScreenState extends State<_LibraryEditorScreen> {
+  late final TextEditingController _controller = TextEditingController(text: widget.content);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    widget.onSave(_controller.text);
+    Navigator.of(context).pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isSpreadsheet = widget.type == 'spreadsheet';
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          tooltip: 'Kembali',
+          onPressed: () => Navigator.of(context).maybePop(),
+        ),
+        title: Text(widget.name, style: const TextStyle(color: Colors.white, fontSize: 16), overflow: TextOverflow.ellipsis),
+        actions: [
+          TextButton(
+            onPressed: _save,
+            child: const Text('Save', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: TextField(
+          controller: _controller,
+          maxLines: null,
+          expands: true,
+          textAlignVertical: TextAlignVertical.top,
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 14,
+            fontFamily: isSpreadsheet ? 'monospace' : null,
+            height: 1.4,
+          ),
+          decoration: InputDecoration(
+            border: InputBorder.none,
+            hintText: isSpreadsheet ? 'kolom1,kolom2,kolom3\nnilai1,nilai2,nilai3' : 'Tulis di sini...',
+            hintStyle: const TextStyle(color: Color(0xFF6E6E6E)),
+          ),
+        ),
       ),
     );
   }

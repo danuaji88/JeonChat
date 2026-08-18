@@ -15,6 +15,7 @@ dependencies:
   audioplayers: ^6.8.1
   speech_to_text: ^7.0.0
   image_picker: ^1.0.0
+  file_picker: ^8.1.2
 
 dev_dependencies:
   flutter_test:
