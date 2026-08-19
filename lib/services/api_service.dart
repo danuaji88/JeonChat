@@ -652,11 +652,16 @@ class ApiService {
     return (data['video_url'] ?? data['url'] ?? data['videoUrl'])?.toString() ?? '';
   }
 
-  /// Generate TTS via /tts endpoint (gratis: Edge Ardi)
-  Future<String> generateTTS(String text) async {
+  /// Generate TTS via /tts endpoint (gratis: Edge Ardi) — [voiceId] opsional,
+  /// dari suara yang dipilih user di Voice Studio (lihat getVoices()).
+  /// Kosong/null = pakai suara default backend.
+  Future<String> generateTTS(String text, {String? voiceId}) async {
     if (!isConfigured) throw ApiException('Base URL belum diatur.');
     final res = await http
-        .post(_uri('/tts'), headers: _headers, body: jsonEncode({'text': text}))
+        .post(_uri('/tts'), headers: _headers, body: jsonEncode({
+          'text': text,
+          if (voiceId != null && voiceId.isNotEmpty) 'voice_id': voiceId,
+        }))
         .timeout(const Duration(seconds: 60));
     if (res.statusCode != 200) {
       throw ApiException('TTS gagal (${res.statusCode})');
@@ -664,6 +669,11 @@ class ApiService {
     final data = jsonDecode(res.body) as Map<String, dynamic>;
     return (data['audio_url'] ?? data['url'] ?? data['audioUrl'])?.toString() ?? '';
   }
+
+  /// Daftar suara TTS Indonesia (Voice Studio) via GET /voices/api —
+  /// {total, voices: [{voice_id, name, gender, age, descriptive, category,
+  /// kelompok, preview_url, cloned_by_count}, ...]}.
+  Future<Map<String, dynamic>> getVoices() => _get('/voices/api', timeout: const Duration(seconds: 30));
 }
 
 /// Satu opsi di dropdown model input bar — dari GET /models 'options' atau

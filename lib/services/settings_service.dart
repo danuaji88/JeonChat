@@ -16,6 +16,11 @@ class SettingsService {
   String callMeAs;
   String aiStyle;
 
+  /// Suara TTS default dipilih dari Voice Studio (lib/screens/voice_studio_screen.dart)
+  /// — null = belum pernah pilih, backend pakai suara default sendiri.
+  String? selectedVoiceId;
+  String? selectedVoiceName;
+
   SettingsService({
     required this.appearance,
     required this.contrast,
@@ -26,6 +31,8 @@ class SettingsService {
     required this.enableDictation,
     required this.callMeAs,
     required this.aiStyle,
+    this.selectedVoiceId,
+    this.selectedVoiceName,
   });
 
   static const _kAppearance = 'jeonchat_pref_appearance';
@@ -37,6 +44,8 @@ class SettingsService {
   static const _kDictation = 'jeonchat_pref_enable_dictation';
   static const _kCallMeAs = 'jeonchat_pref_call_me_as';
   static const _kAiStyle = 'jeonchat_pref_ai_style';
+  static const _kSelectedVoiceId = 'jeonchat_pref_selected_voice_id';
+  static const _kSelectedVoiceName = 'jeonchat_pref_selected_voice_name';
 
   static Future<SettingsService> loadFromPrefs() async {
     final prefs = await SharedPreferences.getInstance();
@@ -50,6 +59,8 @@ class SettingsService {
       enableDictation: prefs.getBool(_kDictation) ?? true,
       callMeAs: prefs.getString(_kCallMeAs) ?? '',
       aiStyle: prefs.getString(_kAiStyle) ?? 'Ringkas',
+      selectedVoiceId: prefs.getString(_kSelectedVoiceId),
+      selectedVoiceName: prefs.getString(_kSelectedVoiceName),
     );
   }
 
@@ -64,6 +75,18 @@ class SettingsService {
     await prefs.setBool(_kDictation, enableDictation);
     await prefs.setString(_kCallMeAs, callMeAs);
     await prefs.setString(_kAiStyle, aiStyle);
+    final voiceId = selectedVoiceId;
+    if (voiceId != null && voiceId.isNotEmpty) {
+      await prefs.setString(_kSelectedVoiceId, voiceId);
+    } else {
+      await prefs.remove(_kSelectedVoiceId);
+    }
+    final voiceName = selectedVoiceName;
+    if (voiceName != null && voiceName.isNotEmpty) {
+      await prefs.setString(_kSelectedVoiceName, voiceName);
+    } else {
+      await prefs.remove(_kSelectedVoiceName);
+    }
   }
 
   Future<void> resetLocalPrefs() async {
@@ -76,6 +99,8 @@ class SettingsService {
     enableDictation = true;
     callMeAs = '';
     aiStyle = 'Ringkas';
+    selectedVoiceId = null;
+    selectedVoiceName = null;
     await save();
   }
 }

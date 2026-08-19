@@ -7,6 +7,7 @@ import '../theme.dart';
 import 'login_screen.dart';
 import 'onboarding_profile_screen.dart';
 import 'skill_list_screen.dart';
+import 'voice_studio_screen.dart';
 
 enum SettingsCategory {
   general,
@@ -137,9 +138,15 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+  String? _selectedVoiceName;
+
   @override
   void initState() {
     super.initState();
+    SettingsService.loadFromPrefs().then((s) {
+      if (!mounted) return;
+      setState(() => _selectedVoiceName = s.selectedVoiceName);
+    });
     final initial = widget.initialCategory;
     if (initial != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -172,21 +179,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
         itemBuilder: (context, i) {
           final cat = SettingsCategory.values[i];
           final isUserSkills = cat == SettingsCategory.userSkills;
+          final isVoice = cat == SettingsCategory.voice;
           return ListTile(
             leading: isUserSkills
                 ? const Text('🧠', style: TextStyle(fontSize: 18))
-                : Icon(cat.icon, size: 19, color: JeonColors.inkMuted),
-            title: Text(cat.label, style: const TextStyle(fontSize: 13.6, color: JeonColors.ink)),
+                : isVoice
+                    ? const Text('🎙️', style: TextStyle(fontSize: 18))
+                    : Icon(cat.icon, size: 19, color: JeonColors.inkMuted),
+            title: Text(isVoice ? 'Pilih Suara Default' : cat.label,
+                style: const TextStyle(fontSize: 13.6, color: JeonColors.ink)),
             subtitle: isUserSkills
                 ? const Text('Kemampuan yang AI pelajari dari kamu',
                     style: TextStyle(fontSize: 10.5, color: JeonColors.inkFaint))
-                : null,
+                : (isVoice && _selectedVoiceName != null)
+                    ? Text('Suara: $_selectedVoiceName',
+                        style: const TextStyle(fontSize: 10.5, color: JeonColors.inkFaint))
+                    : null,
             trailing: const Icon(Icons.chevron_right, size: 18, color: JeonColors.inkFaint),
             onTap: () {
               if (isUserSkills) {
                 Navigator.of(context).push(MaterialPageRoute(
                   builder: (_) => SkillListScreen(api: widget.api, onChanged: widget.onUserSkillsChanged),
                 ));
+                return;
+              }
+              if (isVoice) {
+                Navigator.of(context)
+                    .push<String>(MaterialPageRoute(builder: (_) => VoiceStudioScreen(api: widget.api)))
+                    .then((name) {
+                  if (name == null || !mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Suara $name dipilih')));
+                  setState(() => _selectedVoiceName = name);
+                });
                 return;
               }
               Navigator.of(context).push(MaterialPageRoute(

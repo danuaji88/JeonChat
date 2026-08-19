@@ -15,6 +15,7 @@ import 'library_screen.dart';
 import 'plugins_screen.dart';
 import 'skill_list_screen.dart';
 import 'skills_screen.dart';
+import 'voice_studio_screen.dart';
 import '../widgets/chat_bubble.dart';
 import '../widgets/input_bar.dart';
 import '../widgets/sidebar_jeonchat.dart';
@@ -972,6 +973,20 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     });
   }
 
+  /// Ikon 🎙️ di AppBar — jalan pintas buka Voice Studio (pilih suara TTS
+  /// default) tanpa harus masuk Settings dulu. Auth-gated seperti fitur
+  /// premium lain (Library/Plugins/Code Interpreter/Skills).
+  void _openVoiceStudio() {
+    _requireAuth(() {
+      Navigator.of(context)
+          .push<String>(MaterialPageRoute(builder: (_) => VoiceStudioScreen(api: widget.api)))
+          .then((name) {
+        if (name == null || !mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Suara $name dipilih')));
+      });
+    });
+  }
+
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
@@ -1129,6 +1144,11 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
           ],
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.record_voice_over_outlined, size: 20, color: JeonColors.inkMuted),
+            tooltip: 'Pilih Suara',
+            onPressed: _openVoiceStudio,
+          ),
           IconButton(
             icon: const Icon(Icons.add_comment_outlined, size: 20, color: JeonColors.inkMuted),
             tooltip: 'Chat Baru',
