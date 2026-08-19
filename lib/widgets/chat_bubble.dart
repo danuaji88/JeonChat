@@ -281,41 +281,51 @@ class ChatBubble extends StatelessWidget {
     final name = url.contains('/') ? url.substring(url.lastIndexOf('/') + 1) : url;
     return Container(
       margin: const EdgeInsets.only(top: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
       decoration: BoxDecoration(
-        color: JeonColors.surface3,
-        border: Border.all(color: JeonColors.borderSoft),
         borderRadius: BorderRadius.circular(JeonRadius.small),
       ),
-      child: Row(
-        children: [
-          Container(
-            width: 32,
-            height: 32,
-            decoration:
-                BoxDecoration(color: JeonColors.accentGlow, borderRadius: BorderRadius.circular(8)),
-            alignment: Alignment.center,
-            child: const Icon(Icons.play_circle_outline, size: 18, color: JeonColors.accent),
+      child: InkWell(
+        onTap: () => _openUrl(url),
+        borderRadius: BorderRadius.circular(JeonRadius.small),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+          decoration: BoxDecoration(
+            color: JeonColors.surface3,
+            border: Border.all(color: JeonColors.borderSoft),
+            borderRadius: BorderRadius.circular(JeonRadius.small),
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style:
-                        const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: JeonColors.ink)),
-                const Text('Video siap — player inline menyusul, buka link untuk tonton',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 10.5, color: JeonColors.inkFaint)),
-              ],
-            ),
+          child: Row(
+            children: [
+              Container(
+                width: 32,
+                height: 32,
+                decoration:
+                    BoxDecoration(color: JeonColors.accentGlow, borderRadius: BorderRadius.circular(8)),
+                alignment: Alignment.center,
+                child: const Icon(Icons.play_circle_outline, size: 18, color: JeonColors.accent),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style:
+                            const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: JeonColors.ink)),
+                    const Text('Ketuk untuk buka & putar video',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 10.5, color: JeonColors.inkFaint)),
+                  ],
+                ),
+              ),
+              const Icon(Icons.open_in_new, size: 14, color: JeonColors.inkMuted),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
