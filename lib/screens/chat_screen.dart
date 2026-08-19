@@ -14,6 +14,7 @@ import 'code_screen.dart';
 import 'image_edit_screen.dart';
 import 'library_screen.dart';
 import 'plugins_screen.dart';
+import 'register_screen.dart';
 import 'skill_list_screen.dart';
 import 'skills_screen.dart';
 import 'voice_studio_screen.dart';
@@ -565,6 +566,31 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     }
   }
 
+  /// Khusus fitur media (gambar/video/suara/analisis) — tamu langsung
+  /// disuguhi FORM BUAT AKUN (RegisterScreen), bukan layar login biasa.
+  /// Sesuai aturan owner: "Tampilkan Form Buat Akun Dulu". Setelah daftar
+  /// sukses, fitur dijalankan otomatis.
+  Future<void> _requireAccount(VoidCallback onGranted) async {
+    if (widget.api.isLoggedIn) {
+      onGranted();
+      return;
+    }
+    final registered = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => RegisterScreen(api: widget.api)),
+    );
+    if (!mounted) return;
+    if (registered == true) {
+      setState(() {});
+      _loadQuota();
+      _loadUserSkillCount();
+      ChatHistoryService.enableServerSync(widget.api);
+      await ChatHistoryService.syncFromServer();
+      await _refreshConversationsList();
+      await _refreshProjects();
+      onGranted();
+    }
+  }
+
   Future<void> _refreshConversationsList() async {
     final list = await ChatHistoryService.listConversations();
     if (!mounted) return;
@@ -674,6 +700,13 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
   }
 
   Future<void> _handleMediaRequest(String text, bool isImg, bool isVid, bool isAudio, ChatMessage typing) async {
+    // Tamu: media butuh akun — TAMPILKAN FORM BUAT AKUN dulu
+    if (widget.api.isGuest) {
+      await _requireAccount(() async {
+        await _handleMediaRequest(text, isImg, isVid, isAudio, typing);
+      });
+      return;
+    }
     try {
       // Ekstrak prompt bersih dari teks user
       String prompt = text;
@@ -721,6 +754,14 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     } catch (e) {
       // JANGAN fallback ke agent (lambat → user "berpikir terus" 10 menit).
       // Tampilkan error jujur supaya user tahu & bisa ulangi.
+      // Kalau backend bilang butuh akun (auth_required) → tampilkan form daftar.
+      final msg = e.toString();
+      if (msg.contains('auth_required') || msg.contains('butuh akun') || msg.contains('403')) {
+        await _requireAccount(() async {
+          await _handleMediaRequest(text, isImg, isVid, isAudio, typing);
+        });
+        return;
+      }
       _resolveTyping(typing, ChatMessage(
         isUser: false,
         text: '⚠️ Gagal memproses permintaan media.\n\n'
@@ -1198,27 +1239,29 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
           ),
           JeonChatInputBar(
             onSend: _send,
-            onGenerateImage: _generateImageDirect,
+            onGenerateImage: (p) => _requireAccount(() => _generateImageDirect(p)),
             onSearchWeb: _searchWeb,
-            onDeepResearch: _deepResearch,
-            onGenerateAudio: _generateAudioDirect,
-            onGenerateVideo: _generateVideoDirect,
+            onDeepResearch: (t) => _requireAuth(() => _deepResearch(t)),
+            onGenerateAudio: (t) => _requireAccount(() => _generateAudioDirect(t)),
+            onGenerateVideo: (p) => _requireAccount(() => _generateVideoDirect(p)),
             onVoiceModeResult: _onVoiceModeResult,
             activePluginCount: _installedPlugins.length,
             onOpenPlugins: () => _requireAuth(_openPluginsStore),
             modelOptions: _modelOptions,
-            onAnalyzeImage: _analyzeImage,
+            onAnalyzeImage: (b, m) => _requireAccount(() => _analyzeImage(b, m)),
             onWebSearch: (query) async {
-              final typing = ChatMessage(isUser: false, text: _thinkingText);
-              setState(() {
-                _messages = [..._messages, ChatMessage(isUser: true, text: 'Cari: $query'), typing];
+              await _requireAuth(() async {
+                final typing = ChatMessage(isUser: false, text: _thinkingText);
+                setState(() {
+                  _messages = [..._messages, ChatMessage(isUser: true, text: 'Cari: $query'), typing];
+                });
+                _saveHistory();
+                _scrollToBottom();
+                await _handleWebSearchRequest(query, typing);
+                _scrollToBottom();
               });
-              _saveHistory();
-              _scrollToBottom();
-              await _handleWebSearchRequest(query, typing);
-              _scrollToBottom();
             },
-            onUploadDoc: _uploadDoc,
+            onUploadDoc: (n, t) => _requireAccount(() => _uploadDoc(n, t)),
             onOpenCodeInterpreter: () => _requireAuth(() {
               _openCodeInterpreter();
             }),
