@@ -130,7 +130,7 @@ class ChatBubble extends StatelessWidget {
           children: [
             if (message.docSource != null) _docSourceBadge(message.docSource!),
             if (media != null)
-              media.isVideo ? _videoUrlPlaceholder(media.url) : _markdownImagePreview(media.url),
+              media.isVideo ? _videoUrlPlaceholder(media.url) : _markdownImagePreview(context, media.url),
             SelectableText(
               cleanText,
               style: TextStyle(
@@ -144,7 +144,7 @@ class ChatBubble extends StatelessWidget {
               ),
             ),
             if (message.toolCall != null) ToolCardWidget(toolCall: message.toolCall!),
-            if (message.imageUrl != null) _imagePreview(message.imageUrl!),
+            if (message.imageUrl != null) _imagePreview(context, message.imageUrl!),
             if (message.audioUrl != null) AudioMessagePlayer(url: message.audioUrl!),
             if (message.videoUrl != null) _videoCard(message.videoUrl!),
             if (message.filePath != null) _fileCard(message.filePath!),
@@ -192,32 +192,35 @@ class ChatBubble extends StatelessWidget {
     );
   }
 
-  Widget _markdownImagePreview(String url) => RepaintBoundary(
+  Widget _markdownImagePreview(BuildContext context, String url) => RepaintBoundary(
         child: Container(
           margin: const EdgeInsets.only(bottom: 8),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(12),
-            child: Image.network(
-              url,
-              fit: BoxFit.cover,
-              width: double.infinity,
-              loadingBuilder: (context, child, progress) {
-                if (progress == null) return child;
-                return const _ShimmerBox(height: 180);
-              },
-              errorBuilder: (context, error, stackTrace) => Container(
-                padding: const EdgeInsets.all(10),
-                alignment: Alignment.center,
-                color: JeonColors.surface3,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.broken_image_outlined, color: JeonColors.inkFaint, size: 24),
-                    const SizedBox(height: 6),
-                    Text(url,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(fontSize: 11, color: JeonColors.inkMuted)),
-                  ],
+            child: GestureDetector(
+              onTap: () => _openFullscreenImage(context, url),
+              child: Image.network(
+                url,
+                fit: BoxFit.cover,
+                width: double.infinity,
+                loadingBuilder: (context, child, progress) {
+                  if (progress == null) return child;
+                  return const _ShimmerBox(height: 180);
+                },
+                errorBuilder: (context, error, stackTrace) => Container(
+                  padding: const EdgeInsets.all(10),
+                  alignment: Alignment.center,
+                  color: JeonColors.surface3,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.broken_image_outlined, color: JeonColors.inkFaint, size: 24),
+                      const SizedBox(height: 6),
+                      Text(url,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(fontSize: 11, color: JeonColors.inkMuted)),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -240,32 +243,35 @@ class ChatBubble extends StatelessWidget {
         ),
       );
 
-  Widget _imagePreview(String url) => RepaintBoundary(
+  Widget _imagePreview(BuildContext context, String url) => RepaintBoundary(
         child: Padding(
           padding: const EdgeInsets.only(top: 8),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(12),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 320),
-              child: Image.network(
-                url,
-                width: double.infinity,
-                fit: BoxFit.cover,
-                loadingBuilder: (context, child, progress) {
-                  if (progress == null) return child;
-                  return const _ShimmerBox(height: 180);
-                },
-                errorBuilder: (context, error, stackTrace) => Container(
-                  height: 120,
-                  alignment: Alignment.center,
-                  color: JeonColors.surface3,
-                  child: const Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.broken_image_outlined, color: JeonColors.inkFaint, size: 24),
-                      SizedBox(height: 6),
-                      Text('Gambar gagal dimuat', style: TextStyle(fontSize: 11, color: JeonColors.inkFaint)),
-                    ],
+            child: GestureDetector(
+              onTap: () => _openFullscreenImage(context, url),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 320),
+                child: Image.network(
+                  url,
+                  width: double.infinity,
+                  fit: BoxFit.cover,
+                  loadingBuilder: (context, child, progress) {
+                    if (progress == null) return child;
+                    return const _ShimmerBox(height: 180);
+                  },
+                  errorBuilder: (context, error, stackTrace) => Container(
+                    height: 120,
+                    alignment: Alignment.center,
+                    color: JeonColors.surface3,
+                    child: const Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.broken_image_outlined, color: JeonColors.inkFaint, size: 24),
+                        SizedBox(height: 6),
+                        Text('Gambar gagal dimuat', style: TextStyle(fontSize: 11, color: JeonColors.inkFaint)),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -273,6 +279,69 @@ class ChatBubble extends StatelessWidget {
           ),
         ),
       );
+
+  /// Buka gambar fullscreen (zoom pinch/scroll + tombol unduh). Dipanggil saat
+  /// user mengetuk thumbnail gambar hasil generate/markdown di bubble chat.
+  void _openFullscreenImage(BuildContext context, String url) {
+    showDialog<void>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.85),
+      builder: (dialogContext) => Stack(
+        children: [
+          // Area tappable untuk menutup dialog
+          Positioned.fill(
+            child: GestureDetector(
+              onTap: () => Navigator.of(dialogContext).pop(),
+            ),
+          ),
+          Center(
+            child: InteractiveViewer(
+              minScale: 1.0,
+              maxScale: 5.0,
+              child: Image.network(
+                url,
+                fit: BoxFit.contain,
+                loadingBuilder: (context, child, progress) {
+                  if (progress == null) return child;
+                  return const SizedBox(
+                    width: 120,
+                    height: 120,
+                    child: Center(child: CircularProgressIndicator(color: Colors.white)),
+                  );
+                },
+                errorBuilder: (context, error, stackTrace) => const Text(
+                  'Gambar gagal dimuat',
+                  style: TextStyle(color: Colors.white),
+                ),
+              ),
+            ),
+          ),
+          // Tombol tutup (kiri atas)
+          Positioned(
+            top: 40,
+            left: 16,
+            child: SafeArea(
+              child: IconButton(
+                icon: const Icon(Icons.close, color: Colors.white, size: 28),
+                onPressed: () => Navigator.of(dialogContext).pop(),
+              ),
+            ),
+          ),
+          // Tombol unduh (kanan atas)
+          Positioned(
+            top: 40,
+            right: 16,
+            child: SafeArea(
+              child: IconButton(
+                icon: const Icon(Icons.download, color: Colors.white, size: 26),
+                onPressed: () => _openUrl(url),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _videoCard(String url) {
     final name = url.contains('/') ? url.substring(url.lastIndexOf('/') + 1) : url;
