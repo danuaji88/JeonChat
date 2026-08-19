@@ -8,9 +8,9 @@ import 'package:video_player/video_player.dart';
 
 import '../theme.dart';
 
-/// Inline video player ala Gemini — video diputar langsung di dalam chat
-/// bubble dengan kontrol: play/pause, mute/unmute, progress + scrub,
-/// durasi, download, dan share.
+/// Inline video player ala Gemini — video di kotak rounded dengan tombol
+/// play bulat di tengah + progress bar overlay di dalam video, dan action
+/// bar (download/share/mute) TERPISAH di bawah kotak video (bukan overlay).
 class VideoMessagePlayer extends StatefulWidget {
   final String url;
 
@@ -217,161 +217,143 @@ class _VideoMessagePlayerState extends State<VideoMessagePlayer> {
 
     return Container(
       margin: const EdgeInsets.only(top: 8),
-      decoration: BoxDecoration(
-        color: Colors.black,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: JeonColors.borderSoft),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: AspectRatio(
-        aspectRatio: c.value.aspectRatio == 0 ? 16 / 9 : c.value.aspectRatio,
-        child: GestureDetector(
-          onTap: _toggleControls,
-          child: Stack(
-            alignment: Alignment.center,
-            fit: StackFit.expand,
-            children: [
-              VideoPlayer(c),
-              // Play/pause overlay tengah
-              if (_controlsVisible)
-                AnimatedOpacity(
-                  duration: const Duration(milliseconds: 150),
-                  opacity: _playing ? 0.0 : 1.0,
-                  child: Center(
-                    child: InkWell(
-                      customBorder: const CircleBorder(),
-                      onTap: _togglePlay,
-                      child: Container(
-                        width: 52,
-                        height: 52,
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.45),
-                          shape: BoxShape.circle,
-                        ),
-                        alignment: Alignment.center,
-                        child: Icon(
-                          _playing
-                              ? Icons.pause_rounded
-                              : Icons.play_arrow_rounded,
-                          size: 30,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              // Kontrol bawah (progress + durasi)
-              if (_controlsVisible)
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.transparent,
-                          Colors.black.withValues(alpha: 0.7),
-                        ],
-                      ),
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        SliderTheme(
-                          data: SliderTheme.of(context).copyWith(
-                            trackHeight: 3,
-                            thumbShape: const RoundSliderThumbShape(
-                                enabledThumbRadius: 6),
-                            overlayShape: const RoundSliderOverlayShape(
-                                overlayRadius: 12),
-                            activeTrackColor: JeonColors.accent,
-                            inactiveTrackColor:
-                                Colors.white.withValues(alpha: 0.3),
-                            thumbColor: Colors.white,
-                          ),
-                          child: Slider(
-                            value: progress,
-                            onChanged: (v) => _seek(v),
-                          ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 4),
-                          child: Row(
-                            children: [
-                              Text(
-                                '${_fmt(c.value.position)} / ${_fmt(c.value.duration)}',
-                                style: const TextStyle(
-                                    fontSize: 10.5,
-                                    color: Colors.white,
-                                    fontFamily: 'monospace'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Kotak video — radius besar ala Gemini, kontrol overlay di dalam.
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.black,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: JeonColors.borderSoft),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: AspectRatio(
+              aspectRatio: c.value.aspectRatio == 0 ? 16 / 9 : c.value.aspectRatio,
+              child: GestureDetector(
+                onTap: _toggleControls,
+                child: Stack(
+                  alignment: Alignment.center,
+                  fit: StackFit.expand,
+                  children: [
+                    VideoPlayer(c),
+                    // Tombol play/pause bulat di tengah.
+                    if (_controlsVisible)
+                      AnimatedOpacity(
+                        duration: const Duration(milliseconds: 150),
+                        opacity: _playing ? 0.0 : 1.0,
+                        child: Center(
+                          child: InkWell(
+                            customBorder: const CircleBorder(),
+                            onTap: _togglePlay,
+                            child: Container(
+                              width: 58,
+                              height: 58,
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.85),
+                                shape: BoxShape.circle,
                               ),
-                              const Spacer(),
-                              InkWell(
-                                onTap: _toggleMute,
-                                child: Icon(
-                                  _muted
-                                      ? Icons.volume_off_rounded
-                                      : Icons.volume_up_rounded,
-                                  size: 17,
-                                  color: Colors.white,
+                              alignment: Alignment.center,
+                              child: Icon(
+                                _playing
+                                    ? Icons.pause_rounded
+                                    : Icons.play_arrow_rounded,
+                                size: 32,
+                                color: Colors.black87,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    // Progress bar + durasi, overlay bawah video.
+                    if (_controlsVisible)
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                Colors.transparent,
+                                Colors.black.withValues(alpha: 0.7),
+                              ],
+                            ),
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              SliderTheme(
+                                data: SliderTheme.of(context).copyWith(
+                                  trackHeight: 3,
+                                  thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                                  overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+                                  activeTrackColor: JeonColors.accent,
+                                  inactiveTrackColor: Colors.white.withValues(alpha: 0.3),
+                                  thumbColor: Colors.white,
+                                ),
+                                child: Slider(
+                                  value: progress,
+                                  onChanged: (v) => _seek(v),
+                                ),
+                              ),
+                              Padding(
+                                padding: const EdgeInsets.only(left: 4, bottom: 2),
+                                child: Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: Text(
+                                    '${_fmt(c.value.position)} / ${_fmt(c.value.duration)}',
+                                    style: const TextStyle(
+                                        fontSize: 10.5,
+                                        color: Colors.white,
+                                        fontFamily: 'monospace'),
+                                  ),
                                 ),
                               ),
                             ],
                           ),
                         ),
-                      ],
-                    ),
-                  ),
+                      ),
+                  ],
                 ),
-              // Tombol aksi atas-kanan (download & share)
-              if (_controlsVisible)
-                Positioned(
-                  top: 8,
-                  right: 8,
-                  child: Row(
-                    children: [
-                      _actionCircle(
-                          icon: Icons.file_download_outlined,
-                          tooltip: 'Download',
-                          onTap: _download),
-                      const SizedBox(width: 6),
-                      _actionCircle(
-                          icon: Icons.share_outlined,
-                          tooltip: 'Bagikan',
-                          onTap: _share),
-                    ],
-                  ),
-                ),
-            ],
+              ),
+            ),
           ),
-        ),
+          // Action bar di bawah kotak video (bukan overlay) — download,
+          // share di kiri; mute/volume di kanan.
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Row(
+              children: [
+                _barIcon(icon: Icons.file_download_outlined, tooltip: 'Download', onTap: _download),
+                const SizedBox(width: 2),
+                _barIcon(icon: Icons.share_outlined, tooltip: 'Bagikan', onTap: _share),
+                const Spacer(),
+                _barIcon(
+                  icon: _muted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                  tooltip: _muted ? 'Suarakan' : 'Bisukan',
+                  onTap: _toggleMute,
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _actionCircle(
-      {required IconData icon,
-      required String tooltip,
-      required VoidCallback onTap}) {
+  Widget _barIcon({required IconData icon, required String tooltip, required VoidCallback onTap}) {
     return Tooltip(
       message: tooltip,
       child: InkWell(
-        customBorder: const CircleBorder(),
+        borderRadius: BorderRadius.circular(999),
         onTap: onTap,
-        child: Container(
-          width: 30,
-          height: 30,
-          decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.5),
-            shape: BoxShape.circle,
-          ),
-          alignment: Alignment.center,
-          child: Icon(icon, size: 16, color: Colors.white),
+        child: Padding(
+          padding: const EdgeInsets.all(6),
+          child: Icon(icon, size: 20, color: JeonColors.inkMuted),
         ),
       ),
     );
