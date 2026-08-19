@@ -280,36 +280,39 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
   /// perbaiki dulu judul lama yang masih kepentok "Percakapan Baru" padahal
   /// sudah ada isi pesan (lihat ChatHistoryService.fixAllStaleTitles).
   Future<void> _loadConversations() async {
-    // App start: BUKA FRESH — jangan tampilkan riwayat lama di sidebar.
-    // History lama tetap tersimpan di server per-user (tidak dihapus),
-    // hanya dicek via JEON Chat (Telegram) saat diminta.
+    // App start: sinkron dulu dari server (per-user, sesuai akun yang login)
+    // supaya sidebar menampilkan riwayat MILIK user ini saja — bukan
+    // campuran dari user lain. Kalau belum login, cukup localStorage.
     if (widget.api.isLoggedIn) {
       ChatHistoryService.enableServerSync(widget.api);
+      await ChatHistoryService.syncFromServer();
     }
     await ChatHistoryService.fixAllStaleTitles();
     final projects = await ChatHistoryService.listProjects();
     final list = await ChatHistoryService.listConversations();
     if (!mounted) return;
-
-    // Cari percakapan yang masih kosong (belum ada pesan) — pakai itu supaya
-    // tidak menumpuk "Percakapan Baru" kosong tiap kali app dibuka.
-    String? reuseId;
-    for (final c in list) {
-      final msgs = (c['messages'] as List?) ?? const [];
-      if (msgs.isEmpty) {
-        reuseId = c['id'] as String;
-        break;
-      }
+    if (list.isEmpty) {
+      final id = await ChatHistoryService.createConversation();
+      final refreshed = await ChatHistoryService.listConversations();
+      if (!mounted) return;
+      setState(() {
+        _projects = projects;
+        _conversations = refreshed;
+        _conversationId = id;
+        _messages = [];
+        _agentSession = null;
+      });
+      return;
     }
-    final id = reuseId ?? await ChatHistoryService.createConversation();
-    final refreshed = await ChatHistoryService.listConversations();
+    final activeId = list.first['id'] as String;
+    final active = await ChatHistoryService.loadConversation(activeId);
     if (!mounted) return;
     setState(() {
       _projects = projects;
-      _conversations = refreshed;
-      _conversationId = id;
-      _messages = [];
-      _agentSession = null;
+      _conversations = list;
+      _conversationId = activeId;
+      _messages = _messagesFromConversation(active);
+      _agentSession = active?['agentSession'] as String?;
     });
     _scrollToBottom();
   }
@@ -1033,16 +1036,6 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     });
   }
 
-  /// Sidebar HANYA menampilkan percakapan yang sedang aktif — riwayat lama
-  /// tetap tersimpan di server per-user (bukan dihapus), tapi tidak tampil
-  /// otomatis di app. Owner cek history via JEON Chat (Telegram) saat diminta.
-  List<Map<String, dynamic>> get _visibleConversations {
-    if (_conversationId == null) return const [];
-    return _conversations
-        .where((c) => c['id'] == _conversationId)
-        .toList();
-  }
-
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
@@ -1063,7 +1056,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     final sidebar = JeonChatSidebar(
       api: widget.api,
       profile: widget.profile,
-      conversations: _visibleConversations,
+      conversations: _conversations,
       activeConversationId: _conversationId,
       onNewChat: () {
         _newChat();
