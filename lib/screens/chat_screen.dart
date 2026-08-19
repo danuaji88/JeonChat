@@ -7,6 +7,7 @@ import '../services/api_service.dart';
 import '../services/chat_history_service.dart';
 import '../services/plugin_service.dart';
 import '../services/profile_service.dart';
+import '../services/settings_service.dart';
 import '../theme.dart';
 import 'auth_gate_screen.dart';
 import 'code_screen.dart';
@@ -59,6 +60,10 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
   // ---- Voice mode persisten: saat aktif, SETIAP balasan AI (bukan cuma
   // dari mode dengar sekali _onVoiceModeResult) otomatis dibacakan via /tts. ----
   bool _voiceModeEnabled = false;
+
+  // ---- Suara TTS pilihan user dari Voice Studio (Settings > Pilih Suara
+  // Default) — null = belum pernah pilih, backend pakai suara default. ----
+  String? _selectedVoiceId;
 
   // ---- Dashboard kredit: GET /quota mentah, null = belum dimuat/guest. ----
   Map<String, dynamic>? _quota;
@@ -133,6 +138,10 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       _loadQuota();
       _loadUserSkillCount();
     }
+    SettingsService.loadFromPrefs().then((s) {
+      if (!mounted) return;
+      setState(() => _selectedVoiceId = s.selectedVoiceId);
+    });
   }
 
   Future<void> _loadUserSkillCount() async {
@@ -216,7 +225,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     final text = message.text.trim();
     if (text.isEmpty || text.startsWith('⚠️') || text == _thinkingText) return;
     try {
-      final audioUrl = await widget.api.generateTTS(text);
+      final audioUrl = await widget.api.generateTTS(text, voiceId: _selectedVoiceId);
       if (audioUrl.isEmpty) return;
       final player = AudioPlayer();
       await player.play(UrlSource(audioUrl));
@@ -250,7 +259,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       return;
     }
     try {
-      final audioUrl = await widget.api.generateTTS(lastReply);
+      final audioUrl = await widget.api.generateTTS(lastReply, voiceId: _selectedVoiceId);
       if (audioUrl.isEmpty) return;
       final player = AudioPlayer();
       await player.play(UrlSource(audioUrl));
@@ -700,7 +709,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
         _saveHistory();
         _loadQuota();
       } else if (isAudio) {
-        final audioUrl = await widget.api.generateTTS(prompt);
+        final audioUrl = await widget.api.generateTTS(prompt, voiceId: _selectedVoiceId);
         _resolveTyping(typing, ChatMessage(
           isUser: false,
           text: '✅ Audio siap! 🔊\nTeks: $prompt',
@@ -896,7 +905,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     _saveHistory();
     _scrollToBottom();
     try {
-      final url = await widget.api.generateTTS(text);
+      final url = await widget.api.generateTTS(text, voiceId: _selectedVoiceId);
       _resolveTyping(typing, ChatMessage(isUser: false, text: '✅ Audio siap!', audioUrl: url));
       _loadQuota();
     } catch (e) {
