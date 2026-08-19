@@ -613,15 +613,7 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
                   onPressed: _showPlusMenu,
                 ),
                 Expanded(
-                  // GestureDetector translucent (bukan opaque/AbsorbPointer) di
-                  // sini HANYA menambah jaminan requestFocus() saat area ini
-                  // ditap — tidak menelan/menghalangi gesture asli TextField
-                  // sendiri (yang tetap menangani penempatan kursor normal).
-                  // Fix bug "cursor tidak bisa muncul" di web mode mobile.
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.translucent,
-                    onTap: () => _textFocusNode.requestFocus(),
-                    child: Focus(
+                  child: Focus(
                       // Enter fisik selalu jadi newline di TextField multiline
                       // (tidak memicu onSubmitted) — intercept di sini: Enter
                       // polos = kirim, Shift+Enter = newline (default).
@@ -653,7 +645,6 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
                       ),
                     ),
                   ),
-                ),
                 const SizedBox(width: 4),
                 _modelDropdown(),
                 const SizedBox(width: 2),
