@@ -306,6 +306,20 @@ class ApiService {
     return (res['content'] ?? 'Error: tidak ada respons').toString();
   }
 
+  /// Edit gambar via AI (image-to-image) — /image/edit. Kirim gambar sebagai
+  /// base64 ATAU URL + prompt instruksi editan (contoh: "hapus botol di meja").
+  /// Respons: {image_url, image_path, prompt, provider}. Biaya ~$0.03 (Kie).
+  Future<String> editImage({
+    required String imageBase64,
+    required String prompt,
+  }) async {
+    final res = await _post('/image/edit', {
+      'image_base64': imageBase64,
+      'prompt': prompt,
+    }, timeout: const Duration(seconds: 250));
+    return (res['image_url'] ?? '').toString();
+  }
+
   // ---- Memory: get semua, tambah, hapus per index (dikelompokkan per
   // [kind]), dan pencarian semantik via /memory. ----
 

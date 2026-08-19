@@ -10,6 +10,7 @@ import '../services/profile_service.dart';
 import '../theme.dart';
 import 'auth_gate_screen.dart';
 import 'code_screen.dart';
+import 'image_edit_screen.dart';
 import 'library_screen.dart';
 import 'plugins_screen.dart';
 import 'skill_list_screen.dart';
@@ -928,6 +929,36 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     });
   }
 
+  /// Buka layar edit gambar (AI image editing). [url] = gambar yang mau diedit.
+  /// Hasil edit (URL gambar baru) ditambahkan sebagai pesan asisten baru.
+  void _openImageEditor(String url) {
+    _requireAuth(() {
+      Navigator.of(context)
+          .push(MaterialPageRoute(
+            builder: (_) => ImageEditScreen(
+              imageUrl: url,
+              onEdit: (base64, prompt) => widget.api.editImage(
+                imageBase64: base64,
+                prompt: prompt,
+              ),
+            ),
+          ))
+          .then((editedUrl) {
+        if (editedUrl is String && editedUrl.isNotEmpty && editedUrl != url) {
+          // Tambahkan hasil edit sebagai pesan baru (gambar).
+          final msg = ChatMessage(
+            isUser: false,
+            text: '',
+            imageUrl: editedUrl,
+          );
+          setState(() => _messages = [..._messages, msg]);
+          _saveHistory();
+          _scrollToBottom();
+        }
+      });
+    });
+  }
+
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
@@ -1115,7 +1146,11 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
                       itemCount: _messages.length,
                       scrollCacheExtent: const ScrollCacheExtent.pixels(500),
                       itemBuilder: (context, i) =>
-                          ChatBubble(message: _messages[i], onViewAutoLearnSkill: _openUserSkills),
+                          ChatBubble(
+                            message: _messages[i],
+                            onViewAutoLearnSkill: _openUserSkills,
+                            onEditImage: _openImageEditor,
+                          ),
                     ),
             ),
           ),

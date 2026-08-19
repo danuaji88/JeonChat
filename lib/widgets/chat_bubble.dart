@@ -7,6 +7,7 @@ import '../models/message.dart';
 import '../theme.dart';
 import 'audio_message_player.dart';
 import 'tool_card.dart';
+import 'video_message_player.dart';
 
 const _thinkingPlaceholder = 'JeonAI Sedang Berpikir Lalu Eksekusi Mohon Ditunggu';
 const _analysisGreen = Color(0xFF2ECC71);
@@ -18,7 +19,16 @@ class ChatBubble extends StatelessWidget {
   /// pemanggil tidak menyediakan (banner tetap tampil, tombolnya disembunyikan).
   final VoidCallback? onViewAutoLearnSkill;
 
-  const ChatBubble({super.key, required this.message, this.onViewAutoLearnSkill});
+  /// Buka layar edit gambar (AI image editing) untuk [url]. Null kalau tidak
+  /// disediakan (tombol "Edit" di fullscreen disembunyikan).
+  final void Function(String url)? onEditImage;
+
+  const ChatBubble({
+    super.key,
+    required this.message,
+    this.onViewAutoLearnSkill,
+    this.onEditImage,
+  });
 
   // Deteksi URL media (gambar/video) yang disisipkan AI langsung di teks
   // balasan — baik lewat sintaks markdown image maupun URL polos.
@@ -338,62 +348,72 @@ class ChatBubble extends StatelessWidget {
               ),
             ),
           ),
+          // Toolbar bawah ala referensi: Edit + Hapus (hapus = buka gambar asli)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 16, top: 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (onEditImage != null)
+                      _viewerToolButton(
+                        icon: Icons.brush_outlined,
+                        label: 'Edit',
+                        onTap: () {
+                          Navigator.of(dialogContext).pop();
+                          onEditImage!(url);
+                        },
+                      ),
+                    const SizedBox(width: 28),
+                    _viewerToolButton(
+                      icon: Icons.open_in_new,
+                      label: 'Buka',
+                      onTap: () => _openUrl(url),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _viewerToolButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 52,
+            height: 52,
+            decoration: const BoxDecoration(
+              color: Colors.white12,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: Colors.white, size: 24),
+          ),
+          const SizedBox(height: 6),
+          Text(label, style: const TextStyle(color: Colors.white, fontSize: 12)),
         ],
       ),
     );
   }
 
   Widget _videoCard(String url) {
-    final name = url.contains('/') ? url.substring(url.lastIndexOf('/') + 1) : url;
-    return Container(
-      margin: const EdgeInsets.only(top: 8),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(JeonRadius.small),
-      ),
-      child: InkWell(
-        onTap: () => _openUrl(url),
-        borderRadius: BorderRadius.circular(JeonRadius.small),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-          decoration: BoxDecoration(
-            color: JeonColors.surface3,
-            border: Border.all(color: JeonColors.borderSoft),
-            borderRadius: BorderRadius.circular(JeonRadius.small),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 32,
-                height: 32,
-                decoration:
-                    BoxDecoration(color: JeonColors.accentGlow, borderRadius: BorderRadius.circular(8)),
-                alignment: Alignment.center,
-                child: const Icon(Icons.play_circle_outline, size: 18, color: JeonColors.accent),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style:
-                            const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: JeonColors.ink)),
-                    const Text('Ketuk untuk buka & putar video',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 10.5, color: JeonColors.inkFaint)),
-                  ],
-                ),
-              ),
-              const Icon(Icons.open_in_new, size: 14, color: JeonColors.inkMuted),
-            ],
-          ),
-        ),
-      ),
-    );
+    return VideoMessagePlayer(url: url);
   }
 
   Widget _fileCard(String path) {
