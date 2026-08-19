@@ -12,10 +12,14 @@ import 'package:speech_to_text/speech_to_text.dart';
 import '../services/api_service.dart' show ModelOption;
 import '../theme.dart';
 
-/// Bottom input bar JeonChat: [+] [Ketik pesan...] [model ▾] [🎤] [🔵].
+/// Bottom input bar JeonChat — satu baris pill minimal:
+/// [+] [Ask JeonChat...] [model ▾] [🎤] [kirim / mode-suara].
 /// Semua interaksi murni-UI (dikte, popover "+", pilihan model, textfield)
 /// hidup di sini; aksi yang perlu mengubah percakapan/panggil API dikirim
-/// balik ke parent lewat callback.
+/// balik ke parent lewat callback. Fitur tambahan (upload dokumen, analisis
+/// gambar, buat gambar/video/suara, cari web, riset, code interpreter,
+/// skills) semuanya di menu "+" — tidak lagi jadi ikon terpisah di toolbar,
+/// biar bar tetap satu baris & minimal.
 class JeonChatInputBar extends StatefulWidget {
   final void Function(String text, String model) onSend;
   final ValueChanged<String> onGenerateImage;
@@ -38,21 +42,23 @@ class JeonChatInputBar extends StatefulWidget {
   /// murni UI (tidak panggil ApiService langsung).
   final List<ModelOption> modelOptions;
 
-  /// Gambar dipilih & di-base64-encode di sini, tapi panggilan API +
-  /// mutasi pesan tetap tanggung jawab parent (lewat callback ini).
+  /// Gambar dipilih & di-base64-encode di sini (dari menu "+" → "Analisis
+  /// Gambar"), tapi panggilan API + mutasi pesan tetap tanggung jawab parent
+  /// (lewat callback ini).
   final void Function(String base64Image, String mimeType) onAnalyzeImage;
 
-  /// Tombol ikon globe → dialog query → parent panggil webSearch().
+  /// Dialog cari web di menu "+" → "Cari di Web" — hasil terstruktur
+  /// (beda dari "Cari di Web" versi lama yang lewat agent).
   final ValueChanged<String> onWebSearch;
 
   /// "Upload Dokumen" di menu "+" — teks file sudah dibaca (UTF-8) di sini.
   final void Function(String name, String text) onUploadDoc;
 
-  /// Tombol ikon code — buka Code Interpreter (parent yang push route-nya,
-  /// biar bisa lewat auth gate dulu kayak Library/Plugins).
+  /// "Code Interpreter" di menu "+" — parent yang push route-nya, biar bisa
+  /// lewat auth gate dulu kayak Library/Plugins.
   final VoidCallback? onOpenCodeInterpreter;
 
-  /// Chip "Skills" — buka halaman Custom Skills (parent yang push, auth gate).
+  /// "Skills" di menu "+" — buka halaman Custom Skills (parent yang push, auth gate).
   final VoidCallback? onOpenSkills;
 
   /// Rekaman mic (base64, format PCM16) dikirim ke parent buat ditranskrip
@@ -62,6 +68,9 @@ class JeonChatInputBar extends StatefulWidget {
   /// Toggle "Voice mode" (biru saat aktif) — state disimpan parent karena
   /// dipakai buat memutuskan apakah SETIAP balasan AI (bukan cuma dari mode
   /// dengar sekali via [onVoiceModeResult]) otomatis dibacakan lewat /tts.
+  /// Redesign bar input jadi satu baris minimal tidak lagi punya tombol
+  /// sendiri untuk ini — field dipertahankan biar parent (chat_screen.dart)
+  /// tetap kompatibel tanpa perlu diubah.
   final bool voiceModeEnabled;
   final VoidCallback? onToggleVoiceMode;
 
@@ -95,6 +104,7 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
   static const _selectedModelPrefsKey = 'selected_model';
 
   final _controller = TextEditingController();
+  final _textFocusNode = FocusNode();
   bool _hasText = false;
   ModelOption? _selectedModel;
   String? _pendingSelectedValue;
@@ -177,6 +187,7 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
   @override
   void dispose() {
     _controller.dispose();
+    _textFocusNode.dispose();
     _speech.stop();
     _recordSub?.cancel();
     _audioRecorder.dispose();
@@ -280,8 +291,9 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
     widget.onVoiceModeResult(spoken);
   }
 
-  /// Tombol ikon foto — pilih gambar, baca sebagai base64, kirim ke parent
-  /// buat ditampilkan sebagai bubble user + dianalisis lewat analyzeImage().
+  /// "Analisis Gambar" di menu "+" — pilih gambar, baca sebagai base64,
+  /// kirim ke parent buat ditampilkan sebagai bubble user + dianalisis
+  /// lewat analyzeImage().
   Future<void> _pickAndAnalyzeImage() async {
     try {
       final picked = await ImagePicker().pickImage(
@@ -350,9 +362,8 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
     }
   }
 
-  /// Tombol ikon globe — dialog input query lalu diteruskan ke parent
-  /// (webSearch(), hasil terstruktur — beda dari "+" → "Cari di Web" yang
-  /// lewat agent).
+  /// "Cari di Web" di menu "+" — dialog input query lalu diteruskan ke
+  /// parent (webSearch(), hasil terstruktur).
   Future<void> _showWebSearchDialog() async {
     final controller = TextEditingController();
     final result = await showModalBottomSheet<String>(
@@ -444,6 +455,10 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
               Navigator.of(sheetContext).pop();
               _uploadDocument();
             }),
+            _plusMenuTile(Icons.image_search_rounded, 'Analisis Gambar', onTap: () {
+              Navigator.of(sheetContext).pop();
+              _pickAndAnalyzeImage();
+            }),
             _plusMenuTile(Icons.image_outlined, 'Buat Gambar', onTap: () {
               Navigator.of(sheetContext).pop();
               _promptFor('Buat Gambar', 'Gambar apa yang mau dibuat?', widget.onGenerateImage);
@@ -458,11 +473,19 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
             }),
             _plusMenuTile(Icons.travel_explore_outlined, 'Cari di Web', onTap: () {
               Navigator.of(sheetContext).pop();
-              _promptFor('Cari di Web', 'Mau cari apa?', widget.onSearchWeb);
+              _showWebSearchDialog();
             }),
             _plusMenuTile(Icons.science_outlined, 'Riset Mendalam', onTap: () {
               Navigator.of(sheetContext).pop();
               _promptFor('Riset Mendalam', 'Topik riset apa?', widget.onDeepResearch);
+            }),
+            _plusMenuTile(Icons.code_rounded, 'Code Interpreter', onTap: () {
+              Navigator.of(sheetContext).pop();
+              widget.onOpenCodeInterpreter?.call();
+            }),
+            _plusMenuTile(Icons.auto_awesome_outlined, 'Skills', onTap: () {
+              Navigator.of(sheetContext).pop();
+              widget.onOpenSkills?.call();
             }),
             const SizedBox(height: 8),
           ],
@@ -561,9 +584,7 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
               padding: const EdgeInsets.only(bottom: 6),
               child: Align(alignment: Alignment.centerLeft, child: _pluginBadge()),
             ),
-          _actionChips(),
-          const SizedBox(height: 8),
-          if (_recording) ...[
+          if (_recording)
             Padding(
               padding: const EdgeInsets.only(left: 4, bottom: 8),
               child: Row(
@@ -576,7 +597,6 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
                 ],
               ),
             ),
-          ],
           Container(
             padding: const EdgeInsets.fromLTRB(4, 4, 6, 4),
             decoration: BoxDecoration(
@@ -592,6 +612,51 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
                   tooltip: 'Tambah',
                   onPressed: _showPlusMenu,
                 ),
+                Expanded(
+                  // GestureDetector translucent (bukan opaque/AbsorbPointer) di
+                  // sini HANYA menambah jaminan requestFocus() saat area ini
+                  // ditap — tidak menelan/menghalangi gesture asli TextField
+                  // sendiri (yang tetap menangani penempatan kursor normal).
+                  // Fix bug "cursor tidak bisa muncul" di web mode mobile.
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onTap: () => _textFocusNode.requestFocus(),
+                    child: Focus(
+                      // Enter fisik selalu jadi newline di TextField multiline
+                      // (tidak memicu onSubmitted) — intercept di sini: Enter
+                      // polos = kirim, Shift+Enter = newline (default).
+                      onKeyEvent: (node, event) {
+                        if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.enter) {
+                          if (!HardwareKeyboard.instance.isShiftPressed) {
+                            _submit();
+                            return KeyEventResult.handled;
+                          }
+                        }
+                        return KeyEventResult.ignored;
+                      },
+                      child: TextField(
+                        controller: _controller,
+                        focusNode: _textFocusNode,
+                        autofocus: false,
+                        minLines: 1,
+                        maxLines: 5,
+                        keyboardType: TextInputType.multiline,
+                        textInputAction: TextInputAction.newline,
+                        style: const TextStyle(fontSize: 13.4, color: JeonColors.ink),
+                        decoration: const InputDecoration(
+                          hintText: 'Ask JeonChat...',
+                          hintStyle: TextStyle(color: JeonColors.inkFaint),
+                          border: InputBorder.none,
+                          isDense: true,
+                          contentPadding: EdgeInsets.symmetric(vertical: 10),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                _modelDropdown(),
+                const SizedBox(width: 2),
                 IconButton(
                   icon: _sttLoading
                       ? const SizedBox(
@@ -607,64 +672,6 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
                   tooltip: _recording ? 'Berhenti rekam' : 'Dikte suara (rekam)',
                   onPressed: _sttLoading ? null : _toggleMic,
                 ),
-                IconButton(
-                  icon: Icon(
-                    widget.voiceModeEnabled ? Icons.volume_up_rounded : Icons.volume_off_rounded,
-                    size: 19,
-                    color: widget.voiceModeEnabled ? JeonColors.accent : JeonColors.inkFaint,
-                  ),
-                  tooltip: widget.voiceModeEnabled
-                      ? 'Voice mode aktif — balasan AI dibacakan otomatis'
-                      : 'Aktifkan voice mode (balasan AI dibacakan otomatis)',
-                  onPressed: widget.onToggleVoiceMode,
-                ),
-                Expanded(
-                  child: Focus(
-                    // Enter fisik selalu jadi newline di TextField multiline
-                    // (tidak memicu onSubmitted) — intercept di sini: Enter
-                    // polos = kirim, Shift+Enter = newline (default).
-                    onKeyEvent: (node, event) {
-                      if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.enter) {
-                        if (!HardwareKeyboard.instance.isShiftPressed) {
-                          _submit();
-                          return KeyEventResult.handled;
-                        }
-                      }
-                      return KeyEventResult.ignored;
-                    },
-                    child: TextField(
-                      controller: _controller,
-                      minLines: 1,
-                      maxLines: 5,
-                      keyboardType: TextInputType.multiline,
-                      textInputAction: TextInputAction.newline,
-                      style: const TextStyle(fontSize: 13.4, color: JeonColors.ink),
-                      decoration: const InputDecoration(
-                        hintText: 'Ask JeonChat...',
-                        hintStyle: TextStyle(color: JeonColors.inkFaint),
-                        border: InputBorder.none,
-                        isDense: true,
-                        contentPadding: EdgeInsets.symmetric(vertical: 10),
-                      ),
-                    ),
-                  ),
-                ),
-                _modelDropdown(),
-                IconButton(
-                  icon: const Icon(Icons.code_rounded, size: 19, color: JeonColors.inkFaint),
-                  tooltip: 'Code Interpreter',
-                  onPressed: widget.onOpenCodeInterpreter,
-                ),
-                IconButton(
-                  icon: const Icon(Icons.public, size: 18, color: JeonColors.inkFaint),
-                  tooltip: 'Cari di web',
-                  onPressed: _showWebSearchDialog,
-                ),
-                IconButton(
-                  icon: const Icon(Icons.image_outlined, size: 19, color: JeonColors.inkFaint),
-                  tooltip: 'Analisis gambar',
-                  onPressed: _pickAndAnalyzeImage,
-                ),
                 const SizedBox(width: 2),
                 if (_hasText)
                   Container(
@@ -676,7 +683,6 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
                   )
                 else
                   Container(
-                    margin: const EdgeInsets.only(left: 2),
                     decoration: const BoxDecoration(color: JeonColors.accent, shape: BoxShape.circle),
                     child: IconButton(
                       icon: const Icon(Icons.graphic_eq_rounded, size: 17, color: Color(0xFF04150A)),
@@ -691,41 +697,6 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
       ),
     );
   }
-
-  /// 5 chip aksi cepat (ganti chip teks lama) — masing-masing langsung
-  /// memicu fitur terkait, bukan sekadar isi teks ke chat.
-  Widget _actionChips() => SizedBox(
-        height: 34,
-        child: ListView(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 2),
-          children: [
-            _actionChip('🖼️ Upload Gambar', _pickAndAnalyzeImage),
-            const SizedBox(width: 8),
-            _actionChip('🌐 Cari Web', _showWebSearchDialog),
-            const SizedBox(width: 8),
-            _actionChip('📄 Upload Dokumen', _uploadDocument),
-            const SizedBox(width: 8),
-            _actionChip('💻 Code', widget.onOpenCodeInterpreter),
-            const SizedBox(width: 8),
-            _actionChip('✨ Skills', widget.onOpenSkills),
-          ],
-        ),
-      );
-
-  Widget _actionChip(String label, VoidCallback? onTap) => GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: JeonColors.surface2,
-            border: Border.all(color: JeonColors.border),
-            borderRadius: BorderRadius.circular(JeonRadius.pill),
-          ),
-          child: Text(label, style: const TextStyle(fontSize: 12, color: JeonColors.inkMuted)),
-        ),
-      );
 
   Widget _pluginBadge() => InkWell(
         borderRadius: BorderRadius.circular(999),
@@ -742,6 +713,8 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
         ),
       );
 
+  /// Dropdown model tanpa kotak — cuma teks "label ▾" (+ emoji kecil kalau
+  /// ada), biar bar input tetap terasa satu baris yang bersih.
   Widget _modelDropdown() {
     final selected = _selected;
     return PopupMenuButton<ModelOption>(
@@ -777,22 +750,17 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
                 ),
               ))
           .toList(),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-        decoration: BoxDecoration(
-          color: JeonColors.surface3,
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: JeonColors.border),
-        ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             if (selected.emoji.isNotEmpty) ...[
-              Text(selected.emoji, style: const TextStyle(fontSize: 11.5)),
+              Text(selected.emoji, style: const TextStyle(fontSize: 12)),
               const SizedBox(width: 3),
             ],
             Text(selected.label,
-                style: const TextStyle(fontSize: 11.5, color: JeonColors.inkMuted, fontWeight: FontWeight.w600)),
+                style: const TextStyle(fontSize: 12.5, color: JeonColors.inkMuted, fontWeight: FontWeight.w600)),
             const SizedBox(width: 2),
             const Icon(Icons.expand_more, size: 14, color: JeonColors.inkFaint),
           ],
