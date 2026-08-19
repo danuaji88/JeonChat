@@ -610,11 +610,19 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       showUpgradeDialog(context, api: widget.api, profile: widget.profile);
     }
 
-    // ── Deteksi media request → langsung pakai /media/* endpoint (cepat, gratis) ──
+    // ── Deteksi media request → langsung pakai /media/* endpoint (cepat, gratis dulu) ──
+    // Regex robust: tangkap varian "buat", "buatkan", "buatin", "bikin", "bikinin",
+    // "generate", "cari" + kata target (gambar/video/suara). Perbaikan: "buatkan video"
+    // sebelumnya lolos deteksi (cek 'buat video' dengan spasi) → jatuh ke agent lambat.
     final lower = trimmed.toLowerCase();
-    final isImageRequest = lower.contains('buat gambar') || lower.contains('buat konten gambar') || lower.contains('generate gambar') || lower.contains('cari gambar');
-    final isVideoRequest = lower.contains('buat video') || lower.contains('buat konten video') || lower.contains('cari video');
-    final isAudioRequest = lower.contains('buat suara') || lower.contains('buat konten suara') || lower.contains('text to speech') || lower.contains('tts') || lower.contains('voice over');
+    final _makeVerb = RegExp(r'\b(buat|buatkan|buatin|buatlah|bikin|bikinin|bikinkan|generate|carikan|cari)\b');
+    final _imgTarget = RegExp(r'\b(gambar|image|foto|picture)\b');
+    final _vidTarget = RegExp(r'\b(video|clip|reels|short|tiktok)\b');
+    final _audTarget = RegExp(r'\b(suara|audio|voice\s*over|voiceover|tts|narasi|lagu)\b');
+    final _hasMake = _makeVerb.hasMatch(lower);
+    final isImageRequest = (_hasMake && _imgTarget.hasMatch(lower)) || lower.contains('cari gambar');
+    final isVideoRequest = (_hasMake && _vidTarget.hasMatch(lower)) || lower.contains('cari video');
+    final isAudioRequest = (_hasMake && _audTarget.hasMatch(lower)) || lower.contains('text to speech');
     final isCostRequest = lower.contains('cek biaya') || lower.contains('cek cost') || lower.contains('biaya') || lower.contains('harga');
     // "cari gambar"/"cari video" sudah ditangani media pipeline di atas —
     // prefix "cari "/"search " generik baru dianggap web search kalau bukan itu.
@@ -659,13 +667,17 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     try {
       // Ekstrak prompt bersih dari teks user
       String prompt = text;
-      for (final w in ['buat gambar', 'buat konten gambar', 'generate gambar', 'cari gambar',
-                        'buat video', 'buat konten video', 'cari video',
-                        'buat suara', 'buat konten suara', 'text to speech', 'tts', 'voice over',
-                        'yang gratis', 'gratis']) {
-        prompt = prompt.replaceAll(w, '');
+      for (final w in ['buatkan', 'buatin', 'buatlah', 'buat', 'buat konten',
+                        'generate', 'carikan', 'cari', 'bikinin', 'bikinkan', 'bikin',
+                        'gambar', 'image', 'foto', 'picture',
+                        'video', 'clip', 'reels', 'short', 'tiktok',
+                        'suara', 'audio', 'voice over', 'voiceover', 'tts', 'narasi',
+                        'yang gratis', 'gratis', 'dengan ai', 'pakai ai']) {
+        // Hapus kata kunci sebagai whole-word (case-insensitive) supaya tidak
+        // merusak isi prompt (mis. "video" dalam "video game" tetap bersih).
+        prompt = prompt.replaceAll(RegExp('\\b${RegExp.escape(w)}\\b', caseSensitive: false), ' ');
       }
-      prompt = prompt.trim();
+      prompt = prompt.trim().replaceAll(RegExp(r'\s+'), ' ');
       if (prompt.isEmpty) prompt = text; // fallback ke teks asli
 
       if (isImg) {
@@ -697,11 +709,15 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
         _loadQuota();
       }
     } catch (e) {
-      // Fallback ke agent kalau media endpoint gagal — placeholder "Sedang
-      // berpikir" TETAP dipakai (diteruskan apa adanya), bukan diganti pesan
-      // sementara dulu baru dibuat placeholder baru lagi — biar loading
-      // indicator tidak sempat hilang-lalu-muncul-lagi.
-      await _handleChatRequest(text, 'jeon-chat', typing);
+      // JANGAN fallback ke agent (lambat → user "berpikir terus" 10 menit).
+      // Tampilkan error jujur supaya user tahu & bisa ulangi.
+      _resolveTyping(typing, ChatMessage(
+        isUser: false,
+        text: '⚠️ Gagal memproses permintaan media.\n\n'
+            'Detail: $e\n\n'
+            'Coba ulangi dengan kalimat lebih jelas, misal "buat video kucing oren".',
+      ));
+      _saveHistory();
     } finally {
       _scrollToBottom();
     }
