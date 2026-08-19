@@ -225,10 +225,7 @@ class ChatBubble extends StatelessWidget {
         ),
       );
 
-  Widget _videoUrlPlaceholder(String url) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Text(url, style: const TextStyle(fontSize: 11, color: JeonColors.inkMuted)),
-      );
+  Widget _videoUrlPlaceholder(String url) => _videoCard(url);
 
   Widget _docSourceBadge(String docName) => Padding(
         padding: const EdgeInsets.only(bottom: 6),
