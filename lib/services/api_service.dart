@@ -320,6 +320,35 @@ class ApiService {
     return (res['image_url'] ?? '').toString();
   }
 
+  /// Crop gambar ke rasio (gratis/lokal) — /image/crop.
+  /// [ratio] = "1:1", "5:4", "4:3", "16:9", "9:16", "21:9".
+  Future<String> cropImage({
+    required String imageBase64,
+    required String ratio,
+  }) async {
+    final res = await _post('/image/crop', {
+      'image_base64': imageBase64,
+      'ratio': ratio,
+    }, timeout: const Duration(seconds: 120));
+    return (res['image_url'] ?? '').toString();
+  }
+
+  /// Overlay teks di gambar (gratis/lokal) — /image/text.
+  Future<String> addTextToImage({
+    required String imageBase64,
+    required String text,
+    String position = 'bottom',
+    String color = '#FFFFFF',
+  }) async {
+    final res = await _post('/image/text', {
+      'image_base64': imageBase64,
+      'text': text,
+      'position': position,
+      'color': color,
+    }, timeout: const Duration(seconds: 120));
+    return (res['image_url'] ?? '').toString();
+  }
+
   // ---- Memory: get semua, tambah, hapus per index (dikelompokkan per
   // [kind]), dan pencarian semantik via /memory. ----
 

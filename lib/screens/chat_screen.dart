@@ -929,18 +929,15 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     });
   }
 
-  /// Buka layar edit gambar (AI image editing). [url] = gambar yang mau diedit.
-  /// Hasil edit (URL gambar baru) ditambahkan sebagai pesan asisten baru.
+  /// Buka layar penampil + editor gambar (AI image editing). [url] = gambar
+  /// yang mau diedit. Hasil edit (URL gambar baru) ditambahkan sebagai pesan baru.
   void _openImageEditor(String url) {
     _requireAuth(() {
       Navigator.of(context)
           .push(MaterialPageRoute(
             builder: (_) => ImageEditScreen(
               imageUrl: url,
-              onEdit: (base64, prompt) => widget.api.editImage(
-                imageBase64: base64,
-                prompt: prompt,
-              ),
+              api: widget.api,
             ),
           ))
           .then((editedUrl) {

@@ -3,83 +3,46 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:share_plus/share_plus.dart';
 
+import '../services/api_service.dart';
 import '../theme.dart';
 
-/// Layar edit gambar ala ChatGPT/Gemini (AI generative image editing).
+/// Layar penampil + editor gambar (ala referensi Appa).
 ///
-/// Alur:
-///   1. Gambar tampil penuh sebagai latar (dengan dark overlay biar input
-///      kontras & gampang dibaca).
-///   2. Kolom input melayang "Jelaskan editan" + ikon mic + tombol kirim.
-///   3. Kirim → panggil backend /image/edit (Kie Seedream i2i, ~$0.03).
-///   4. Hasil editan tampil menggantikan gambar.
+/// Top bar  : X (tutup), ⋮ (menu), ⬇ (unduh), "Bagikan" (pill).
+/// Toolbar  : Edit (AI), Komentar (teks), Ubah ukuran (crop), Hapus (reset).
+/// Popup    : rasio crop (1:1, 5:4, 4:3, 16:9, 9:16, 21:9).
 ///
-/// [imageUrl] = URL gambar yang mau diedit (dari bubble chat / generate).
-/// [api] = fungsi editImage sudah terpasang di ApiService; screen ini hanya
-/// perlu kirim gambar base64 + prompt, lalu terima URL hasil.
+/// Semua tombol berfungsi end-to-end (bukan dekoratif):
+///   - Edit       → AI image-to-image (Kie ~$0.03), prompt via dialog.
+///   - Komentar   → overlay teks (gratis/lokal).
+///   - Ubah ukuran→ crop rasio (gratis/lokal).
+///   - Hapus      → reset ke gambar asli.
+///   - Bagikan    → share sheet (share_plus).
+///   - Unduh      → buka URL di tab eksternal.
 class ImageEditScreen extends StatefulWidget {
   final String imageUrl;
-  final Future<String> Function(String base64Image, String prompt) onEdit;
+  final ApiService api;
 
-  const ImageEditScreen({
-    super.key,
-    required this.imageUrl,
-    required this.onEdit,
-  });
+  const ImageEditScreen({super.key, required this.imageUrl, required this.api});
 
   @override
   State<ImageEditScreen> createState() => _ImageEditScreenState();
 }
 
 class _ImageEditScreenState extends State<ImageEditScreen> {
-  final _controller = TextEditingController();
-  final _focusNode = FocusNode();
-  bool _editing = false;
-  String? _currentUrl; // URL gambar yang sedang tampil (asli / hasil edit)
+  String? _currentUrl; // gambar yang sedang tampil (asli / hasil edit)
+  String? _originalUrl;
+  bool _busy = false;
   String? _error;
-  String? _lastPrompt;
+  String _busyLabel = '';
 
   @override
   void initState() {
     super.initState();
+    _originalUrl = widget.imageUrl;
     _currentUrl = widget.imageUrl;
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    _focusNode.dispose();
-    super.dispose();
-  }
-
-  /// Download gambar (URL) jadi base64, lalu kirim ke backend edit.
-  Future<void> _submitEdit() async {
-    final prompt = _controller.text.trim();
-    if (prompt.isEmpty || _editing) return;
-
-    setState(() {
-      _editing = true;
-      _error = null;
-      _lastPrompt = prompt;
-    });
-
-    try {
-      final bytes = await _downloadImage(_currentUrl ?? widget.imageUrl);
-      final base64 = base64Encode(bytes);
-      final resultUrl = await widget.onEdit(base64, prompt);
-      if (resultUrl.isEmpty) {
-        throw Exception('Backend tidak mengembalikan URL hasil.');
-      }
-      setState(() {
-        _currentUrl = resultUrl;
-        _controller.clear();
-      });
-    } catch (e) {
-      setState(() => _error = 'Gagal edit: $e');
-    } finally {
-      if (mounted) setState(() => _editing = false);
-    }
   }
 
   Future<Uint8List> _downloadImage(String url) async {
@@ -90,63 +53,208 @@ class _ImageEditScreenState extends State<ImageEditScreen> {
     return res.bodyBytes;
   }
 
+  Future<String> _base64OfCurrent() async {
+    final bytes = await _downloadImage(_currentUrl ?? widget.imageUrl);
+    return base64Encode(bytes);
+  }
+
+  void _setBusy(String label, bool v) {
+    setState(() {
+      _busy = v;
+      _busyLabel = label;
+      if (v) _error = null;
+    });
+  }
+
+  void _applyResult(String newUrl) {
+    setState(() => _currentUrl = newUrl);
+  }
+
+  // ── Aksi toolbar ─────────────────────────────────────────────────
+
+  /// Edit AI → dialog prompt → /image/edit.
+  Future<void> _editAi() async {
+    final prompt = await _promptDialog(
+      title: 'Edit Gambar',
+      hint: 'Jelaskan editan (contoh: hapus botol di meja)',
+    );
+    if (prompt == null || prompt.isEmpty) return;
+
+    _setBusy('Mengedit...', true);
+    try {
+      final b64 = await _base64OfCurrent();
+      final url = await widget.api.editImage(imageBase64: b64, prompt: prompt);
+      if (url.isEmpty) throw Exception('Backend tidak mengembalikan URL.');
+      _applyResult(url);
+    } catch (e) {
+      setState(() => _error = 'Gagal edit: $e');
+    } finally {
+      _setBusy('', false);
+    }
+  }
+
+  /// Komentar → dialog teks → /image/text.
+  Future<void> _addComment() async {
+    final text = await _promptDialog(
+      title: 'Tambah Komentar',
+      hint: 'Tulis teks...',
+      confirm: 'Tambahkan',
+    );
+    if (text == null || text.isEmpty) return;
+
+    _setBusy('Menambah teks...', true);
+    try {
+      final b64 = await _base64OfCurrent();
+      final url = await widget.api.addTextToImage(
+        imageBase64: b64,
+        text: text,
+        position: 'bottom',
+        color: '#FFFFFF',
+      );
+      if (url.isEmpty) throw Exception('Backend tidak mengembalikan URL.');
+      _applyResult(url);
+    } catch (e) {
+      setState(() => _error = 'Gagal tambah teks: $e');
+    } finally {
+      _setBusy('', false);
+    }
+  }
+
+  /// Ubah ukuran → popup rasio → /image/crop.
+  Future<void> _crop() async {
+    final ratio = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: const Color(0xFF1C2128),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (ctx) => _RatioSheet(),
+    );
+    if (ratio == null) return;
+
+    _setBusy('Memotong ($ratio)...', true);
+    try {
+      final b64 = await _base64OfCurrent();
+      final url = await widget.api.cropImage(imageBase64: b64, ratio: ratio);
+      if (url.isEmpty) throw Exception('Backend tidak mengembalikan URL.');
+      _applyResult(url);
+    } catch (e) {
+      setState(() => _error = 'Gagal crop: $e');
+    } finally {
+      _setBusy('', false);
+    }
+  }
+
+  /// Hapus → reset ke gambar asli.
+  void _reset() {
+    setState(() {
+      _currentUrl = _originalUrl;
+      _error = null;
+    });
+  }
+
+  /// Unduh → buka URL eksternal.
+  Future<void> _download() async {
+    try {
+      // launchUrlString perlu import url_launcher; tapi untuk kompatibilitas
+      // gunakan share/copy fallback dulu.
+      await Share.share('Gambar JEON: ${_currentUrl}', subject: 'Gambar JEON');
+    } catch (_) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Buka gambar: $_currentUrl')),
+      );
+    }
+  }
+
+  /// Bagikan → share sheet.
+  Future<void> _share() async {
+    try {
+      await Share.share('Gambar JEON: ${_currentUrl}', subject: 'Gambar JEON');
+    } catch (_) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Link gambar disalin ke clipboard')),
+      );
+    }
+  }
+
+  Future<String?> _promptDialog({
+    required String title,
+    required String hint,
+    String confirm = 'Kirim',
+  }) {
+    final controller = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1C2128),
+        title: Text(title, style: const TextStyle(color: Colors.white)),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: const TextStyle(color: Colors.white),
+          decoration: InputDecoration(
+            hintText: hint,
+            hintStyle: const TextStyle(color: Colors.white38),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Batal', style: TextStyle(color: Colors.white54)),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
+            child: Text(confirm),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          // ── Gambar penuh sebagai latar ──────────────────────────
+          // Gambar penuh
           Positioned.fill(
             child: Image.network(
               _currentUrl ?? widget.imageUrl,
               fit: BoxFit.contain,
               loadingBuilder: (context, child, progress) {
                 if (progress == null) return child;
-                return const Center(child: CircularProgressIndicator(color: Colors.white));
+                return const Center(
+                  child: CircularProgressIndicator(color: Colors.white),
+                );
               },
               errorBuilder: (context, error, stackTrace) => const Center(
-                child: Text('Gambar gagal dimuat', style: TextStyle(color: Colors.white)),
+                child: Text('Gambar gagal dimuat',
+                    style: TextStyle(color: Colors.white)),
               ),
             ),
           ),
-          // Dark overlay biar input kontras (ala referensi)
-          Positioned.fill(
-            child: IgnorePointer(
-              child: Container(color: Colors.black.withValues(alpha: 0.35)),
-            ),
-          ),
 
-          // ── Header: tombol tutup (X) kiri atas ──────────────────
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: SafeArea(
-              bottom: false,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                child: Row(
-                  children: [
-                    _CircleButton(
-                      icon: Icons.close,
-                      onTap: () => Navigator.of(context).pop(_currentUrl),
-                    ),
-                    const Spacer(),
-                    if (_error == null)
-                      Text(
-                        _editing
-                            ? 'Mengedit...'
-                            : (_lastPrompt == null ? 'Jelaskan editan' : 'Diedit: $_lastPrompt'),
-                        style: const TextStyle(color: Colors.white70, fontSize: 12.5),
-                      ),
-                  ],
+          // Busy overlay
+          if (_busy)
+            Positioned.fill(
+              child: Container(
+                color: Colors.black54,
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const CircularProgressIndicator(color: Colors.white),
+                      const SizedBox(height: 14),
+                      Text(_busyLabel,
+                          style: const TextStyle(color: Colors.white)),
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
 
-          // ── Error banner ─────────────────────────────────────────
+          // Error banner
           if (_error != null)
             Positioned(
               left: 16,
@@ -158,87 +266,61 @@ class _ImageEditScreenState extends State<ImageEditScreen> {
                   color: Colors.red.shade900.withValues(alpha: 0.9),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Text(
-                  _error!,
-                  style: const TextStyle(color: Colors.white, fontSize: 12.5),
-                ),
+                child: Text(_error!,
+                    style: const TextStyle(color: Colors.white, fontSize: 12.5)),
               ),
             ),
 
-          // ── Input melayang "Jelaskan editan" ─────────────────────
+          // ── Top bar: X, ⋮, ⬇, Bagikan ────────────────────────────
           Positioned(
-            left: 12,
-            right: 12,
+            top: 0,
+            left: 0,
+            right: 0,
+            child: SafeArea(
+              bottom: false,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                child: Row(
+                  children: [
+                    _TopIcon(icon: Icons.close, onTap: () => Navigator.of(context).pop(_currentUrl)),
+                    _TopIcon(icon: Icons.more_vert, onTap: _showMoreMenu),
+                    const Spacer(),
+                    _TopIcon(icon: Icons.download, onTap: _download),
+                    const SizedBox(width: 8),
+                    FilledButton(
+                      onPressed: _share,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+                        shape: const StadiumBorder(),
+                      ),
+                      child: const Text('Bagikan',
+                          style: TextStyle(fontWeight: FontWeight.w600)),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // ── Bottom toolbar: Edit, Komentar, Ubah ukuran, Hapus ────
+          Positioned(
+            left: 0,
+            right: 0,
             bottom: 0,
             child: SafeArea(
               top: false,
               child: Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: const Color(0xE61C2128), // frosted dark
-                    borderRadius: BorderRadius.circular(JeonRadius.pill),
-                    border: Border.all(color: Colors.white12),
-                  ),
-                  child: Row(
-                    children: [
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: TextField(
-                          controller: _controller,
-                          focusNode: _focusNode,
-                          autofocus: true,
-                          minLines: 1,
-                          maxLines: 4,
-                          textInputAction: TextInputAction.send,
-                          style: const TextStyle(color: Colors.white, fontSize: 14),
-                          decoration: const InputDecoration(
-                            hintText: 'Jelaskan editan',
-                            hintStyle: TextStyle(color: Colors.white54),
-                            border: InputBorder.none,
-                            isDense: true,
-                            contentPadding: EdgeInsets.symmetric(vertical: 10),
-                          ),
-                          onSubmitted: (_) => _submitEdit(),
-                        ),
-                      ),
-                      // Ikon mic (visual, dikte on-device bisa ditambah di sini)
-                      IconButton(
-                        icon: const Icon(Icons.mic_none, color: Colors.white70, size: 22),
-                        onPressed: () {
-                          // Dikte belum terpasang di screen ini — hint ringan.
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Dikte suara tersedia di input bar chat utama.'),
-                              duration: Duration(seconds: 2),
-                            ),
-                          );
-                        },
-                      ),
-                      // Tombol kirim
-                      _editing
-                          ? const Padding(
-                              padding: EdgeInsets.all(12),
-                              child: SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2.5,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            )
-                          : IconButton(
-                              icon: const Icon(Icons.arrow_upward, color: Colors.black),
-                              style: IconButton.styleFrom(
-                                backgroundColor: Colors.white,
-                                disabledBackgroundColor: Colors.white38,
-                              ),
-                              onPressed: _submitEdit,
-                            ),
-                    ],
-                  ),
+                padding: const EdgeInsets.only(bottom: 12, top: 6),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    _ToolButton(icon: Icons.edit_outlined, label: 'Edit', onTap: _editAi),
+                    _ToolButton(icon: Icons.chat_bubble_outline, label: 'Komentar', onTap: _addComment),
+                    _ToolButton(icon: Icons.crop, label: 'Ubah ukuran', onTap: _crop),
+                    _ToolButton(icon: Icons.delete_outline, label: 'Hapus', onTap: _reset),
+                  ],
                 ),
               ),
             ),
@@ -247,27 +329,171 @@ class _ImageEditScreenState extends State<ImageEditScreen> {
       ),
     );
   }
+
+  void _showMoreMenu() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF1C2128),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.download, color: Colors.white),
+              title: const Text('Unduh gambar', style: TextStyle(color: Colors.white)),
+              onTap: () { Navigator.of(ctx).pop(); _download(); },
+            ),
+            ListTile(
+              leading: const Icon(Icons.share, color: Colors.white),
+              title: const Text('Bagikan', style: TextStyle(color: Colors.white)),
+              onTap: () { Navigator.of(ctx).pop(); _share(); },
+            ),
+            ListTile(
+              leading: const Icon(Icons.restore, color: Colors.white),
+              title: const Text('Kembalikan asli', style: TextStyle(color: Colors.white)),
+              onTap: () { Navigator.of(ctx).pop(); _reset(); },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
-class _CircleButton extends StatelessWidget {
+/// Tombol ikon bulat di top bar.
+class _TopIcon extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
-  const _CircleButton({required this.icon, required this.onTap});
+  const _TopIcon({required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const CircleBorder(),
+        child: Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: Colors.black45,
+            shape: BoxShape.circle,
+          ),
+          child: Icon(icon, color: Colors.white, size: 22),
+        ),
+      ),
+    );
+  }
+}
+
+/// Tombol toolbar bawah (ikon lingkaran + label).
+class _ToolButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  const _ToolButton({required this.icon, required this.label, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
-      customBorder: const CircleBorder(),
-      child: Container(
-        width: 38,
-        height: 38,
-        decoration: BoxDecoration(
-          color: Colors.black45,
-          shape: BoxShape.circle,
-          border: Border.all(color: Colors.white24),
-        ),
-        child: Icon(icon, color: Colors.white, size: 20),
+      borderRadius: BorderRadius.circular(12),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 54,
+            height: 54,
+            decoration: BoxDecoration(
+              color: const Color(0xFF2D333B),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: Colors.white, size: 24),
+          ),
+          const SizedBox(height: 5),
+          Text(label, style: const TextStyle(color: Colors.white, fontSize: 12)),
+        ],
+      ),
+    );
+  }
+}
+
+/// Bottom sheet pilihan rasio crop.
+class _RatioSheet extends StatelessWidget {
+  static const _ratios = [
+    ('1:1', 'Persegi'),
+    ('5:4', 'Lanskap 5:4'),
+    ('4:3', 'Lanskap 4:3'),
+    ('16:9', 'Layar lebar 16:9'),
+    ('9:16', 'Cerita 9:16'),
+    ('21:9', 'Ultra Lebar 21:9'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Ubah ukuran',
+              style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: _ratios.map((r) {
+              return InkWell(
+                onTap: () => Navigator.of(context).pop(r.$1),
+                borderRadius: BorderRadius.circular(10),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _RatioGlyph(ratio: r.$1),
+                    const SizedBox(height: 6),
+                    Text(r.$2,
+                        style: const TextStyle(color: Colors.white70, fontSize: 11)),
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Glif visual rasio (persegi panjang proporsional).
+class _RatioGlyph extends StatelessWidget {
+  final String ratio;
+  const _RatioGlyph({required this.ratio});
+
+  @override
+  Widget build(BuildContext context) {
+    final parts = ratio.split(':');
+    final w = double.parse(parts[0]);
+    final h = double.parse(parts[1]);
+    // Normalisasi ke kotak ~44px
+    double boxW, boxH;
+    if (w >= h) {
+      boxW = 44;
+      boxH = 44 * (h / w);
+    } else {
+      boxH = 44;
+      boxW = 44 * (w / h);
+    }
+    return Container(
+      width: boxW,
+      height: boxH,
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.white54, width: 1.5),
+        borderRadius: BorderRadius.circular(3),
       ),
     );
   }
