@@ -444,6 +444,8 @@ class ApiService {
   Future<void> removeMemory(String kind, int index) =>
       _post('/memory', {'action': 'remove', 'kind': kind, 'index': index});
 
+  Future<Map<String, dynamic>> clearMemory() => _post('/memory', {'action': 'clear'});
+
   Future<List<dynamic>> searchMemory(String query) async {
     final res = await _post('/memory', {'action': 'search', 'query': query});
     return (res['results'] as List?) ?? [];

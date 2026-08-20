@@ -6,6 +6,7 @@ import '../services/settings_service.dart';
 import '../theme.dart';
 import 'custom_instructions_screen.dart';
 import 'login_screen.dart';
+import 'memory_screen.dart';
 import 'onboarding_profile_screen.dart';
 import 'skill_list_screen.dart';
 import 'voice_studio_screen.dart';
@@ -87,7 +88,7 @@ extension SettingsCategoryX on SettingsCategory {
       case SettingsCategory.customInstructions:
         return 'Instruksi Kustom';
       case SettingsCategory.memory:
-        return 'Memory';
+        return 'Memori Saya';
       case SettingsCategory.userSkills:
         return 'Skill Saya';
       case SettingsCategory.plugins:
@@ -187,6 +188,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           final isUserSkills = cat == SettingsCategory.userSkills;
           final isVoice = cat == SettingsCategory.voice;
           final isCustomInstructions = cat == SettingsCategory.customInstructions;
+          final isMemory = cat == SettingsCategory.memory;
           return ListTile(
             leading: isUserSkills
                 ? const Text('🧠', style: TextStyle(fontSize: 18))
@@ -201,7 +203,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 : isCustomInstructions
                     ? const Text('Personalisasi cara JEON Chat merespons kamu',
                         style: TextStyle(fontSize: 10.5, color: JeonColors.inkFaint))
-                    : (isVoice && _selectedVoiceName != null)
+                    : isMemory
+                        ? const Text('Fakta & catatan yang AI ingat tentang kamu',
+                            style: TextStyle(fontSize: 10.5, color: JeonColors.inkFaint))
+                        : (isVoice && _selectedVoiceName != null)
                         ? Text('Suara: $_selectedVoiceName',
                             style: const TextStyle(fontSize: 10.5, color: JeonColors.inkFaint))
                         : null,
@@ -216,6 +221,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
               if (isCustomInstructions) {
                 Navigator.of(context).push(MaterialPageRoute(
                   builder: (_) => CustomInstructionsScreen(api: widget.api),
+                ));
+                return;
+              }
+              if (isMemory) {
+                Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => MemoryScreen(api: widget.api),
                 ));
                 return;
               }
