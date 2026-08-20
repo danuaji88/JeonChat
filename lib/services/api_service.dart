@@ -172,6 +172,21 @@ class ApiService {
     return res;
   }
 
+  /// Konfigurasi publik login sosial (tanpa secret) — dipakai tombol OAuth
+  /// (TikTok, dsb) untuk mengambil client_key & redirect_uri.
+  Future<Map<String, dynamic>> fetchSocialConfig() async {
+    final res = await http
+        .get(_uri('/auth/social/config'), headers: const {'Content-Type': 'application/json'})
+        .timeout(_shortTimeout, onTimeout: () => throw ApiException('Timeout: server tidak merespons.'));
+    if (res.statusCode != 200) {
+      throw ApiException('Gagal ambil konfigurasi sosial (${res.statusCode}).');
+    }
+    final data = jsonDecode(res.body);
+    return (data is Map<String, dynamic> && data['providers'] is Map<String, dynamic>)
+        ? data['providers'] as Map<String, dynamic>
+        : <String, dynamic>{};
+  }
+
   /// Langkah 1 login WhatsApp/HP — minta OTP dikirim ke [phone]. Respons:
   /// {ok, message, dev_hint, expires_in} — dev_hint = OTP sementara selama
   /// belum ada gateway SMS/WA asli.

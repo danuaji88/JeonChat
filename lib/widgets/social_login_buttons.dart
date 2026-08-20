@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:url_launcher/url_launcher_string.dart';
 
 import '../services/api_service.dart';
 import '../theme.dart';
@@ -53,6 +54,42 @@ class _SocialLoginButtonsState extends State<SocialLoginButtons> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Login gagal, coba lagi.')),
       );
+    } finally {
+      if (mounted) setState(() => _loadingProvider = null);
+    }
+  }
+
+  /// TikTok OAuth — buka halaman otorisasi TikTok (client_key publik dari
+  /// config server via /auth/social/config), redirect balik ke callback
+  /// server → #token=... → user login dengan token itu.
+  Future<void> _loginWithTikTok() async {
+    setState(() => _loadingProvider = 'tiktok');
+    try {
+      final cfg = await widget.api.fetchSocialConfig();
+      final tk = cfg['tiktok'] as Map<String, dynamic>?;
+      final clientKey = tk?['client_key']?.toString() ?? '';
+      final redirectUri = tk?['redirect_uri']?.toString() ?? '';
+      if (clientKey.isEmpty || redirectUri.isEmpty) {
+        if (mounted) _showNotConfigured('TikTok');
+        return;
+      }
+      final state = DateTime.now().millisecondsSinceEpoch.toString();
+      final authUrl = 'https://www.tiktok.com/v2/auth/authorize/'
+          '?client_key=$clientKey'
+          '&response_type=code'
+          '&scope=user.info.basic'
+          '&redirect_uri=${Uri.encodeComponent(redirectUri)}'
+          '&state=$state';
+      final ok = await launchUrlString(authUrl, mode: LaunchMode.externalApplication);
+      if (!ok && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Gagal membuka halaman TikTok.')),
+        );
+      }
+      // User diarahkan ke callback server → #token=... — halaman login
+      // akan menangkap token via URL (lihat LoginScreen._goNext/init).
+    } catch (e) {
+      if (mounted) _showNotConfigured('TikTok');
     } finally {
       if (mounted) setState(() => _loadingProvider = null);
     }
@@ -310,7 +347,8 @@ class _SocialLoginButtonsState extends State<SocialLoginButtons> {
           bg: Colors.black,
           fg: Colors.white,
           border: Colors.black,
-          onTap: _loading ? null : () => _showNotConfigured('TikTok'),
+          onTap: _loading ? null : _loginWithTikTok,
+          loading: _loadingProvider == 'tiktok',
           leading: const Icon(Icons.music_note_rounded, size: 18, color: Colors.white),
         ),
         const SizedBox(height: 10),
