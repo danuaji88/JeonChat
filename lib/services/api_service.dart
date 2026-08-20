@@ -557,6 +557,7 @@ class ApiService {
     required String model,
     String? sessionId,
     CancelToken? cancelToken,
+    bool incognito = false,
   }) async {
     if (!isConfigured) {
       throw ApiException('Base URL belum diatur. Buka Settings untuk isi URL backend.');
@@ -569,6 +570,7 @@ class ApiService {
       ],
       'model': model,
       if (sessionId != null && sessionId.isNotEmpty) 'session_id': sessionId,
+      if (incognito) 'incognito': true,
     };
     final client = http.Client();
     cancelToken?._client = client;

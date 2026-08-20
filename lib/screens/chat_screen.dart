@@ -83,6 +83,12 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
   // dari mode dengar sekali _onVoiceModeResult) otomatis dibacakan via /tts. ----
   bool _voiceModeEnabled = false;
 
+  // ---- Incognito Mode: pesan tetap tampil normal di layar selama sesi
+  // berlangsung, tapi tidak pernah ditulis ke ChatHistoryService (lihat
+  // guard di _saveHistory()) dan diteruskan ke backend /chat sebagai flag
+  // "incognito" (server juga tidak mencatatnya ke jeongpt_history.json). ----
+  bool _incognito = false;
+
   // ---- Suara TTS pilihan user dari Voice Studio (Settings > Pilih Suara
   // Default) — null = belum pernah pilih, backend pakai suara default. ----
   String? _selectedVoiceId;
@@ -419,7 +425,10 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
   /// pengaman kedua untuk data lama yang mungkin sudah kejadian ini).
   Future<void> _saveHistory() async {
     final id = _conversationId;
-    if (id == null) return;
+    // Incognito: jangan pernah tulis ke ChatHistoryService (local maupun
+    // server sync) — ini satu-satunya jalur simpan history, jadi guard di
+    // sini otomatis berlaku untuk SEMUA titik yang memanggil _saveHistory().
+    if (id == null || _incognito) return;
     final persisted = _messages.where((m) => m.text != _thinkingText).toList();
     await ChatHistoryService.saveConversation(id, persisted, agentSession: _agentSession);
     final list = await ChatHistoryService.listConversations();
@@ -448,6 +457,11 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       _messagesOpacity = 0.0;
       _showPluginsStore = false;
       _activeDocName = null;
+      // Incognito tidak boleh "bocor" ke percakapan lain — percakapan
+      // incognito sebelumnya (kalau ada) dibuang begitu saja dari _messages
+      // di atas; karena _saveHistory() digated selama _incognito true, tidak
+      // ada yang perlu dibersihkan dari storage (memang tidak pernah ditulis).
+      _incognito = false;
     });
     _fadeInMessages();
   }
@@ -463,6 +477,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       _conversationId = id;
       _messages = _messagesFromConversation(conv);
       _agentSession = conv['agentSession'] as String?;
+      _incognito = false;
       _messagesOpacity = 0.0;
       _showPluginsStore = false;
       _activeDocName = null;
@@ -860,7 +875,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     });
     try {
       final reply =
-          await widget.api.sendChat(history: _cleanHistory(), model: _lastModel, cancelToken: cancelToken);
+          await widget.api.sendChat(history: _cleanHistory(), model: _lastModel, cancelToken: cancelToken, incognito: _incognito);
       final parsed = _extractAutoLearn(reply);
       _resolveTyping(typing, ChatMessage(isUser: false, text: parsed.text, autoLearnSkill: parsed.autoLearnSkill));
     } on RequestCancelledException {
@@ -879,7 +894,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       _activeCancelToken = cancelToken;
     });
     try {
-      final reply = await widget.api.sendChat(history: _cleanHistory(), model: model, cancelToken: cancelToken);
+      final reply = await widget.api.sendChat(history: _cleanHistory(), model: model, cancelToken: cancelToken, incognito: _incognito);
       _resolveTyping(typing, ChatMessage(isUser: false, text: reply));
     } on RequestCancelledException {
       _resolveTyping(typing, const ChatMessage(isUser: false, text: 'Dihentikan.'));
@@ -996,7 +1011,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     } on AgentTimeoutException {
       // Agent timeout — auto-fallback ke /chat
       try {
-        final reply = await widget.api.sendChat(history: _cleanHistory(), model: model, cancelToken: cancelToken);
+        final reply = await widget.api.sendChat(history: _cleanHistory(), model: model, cancelToken: cancelToken, incognito: _incognito);
         final parsed = _extractAutoLearn(reply);
         _resolveTyping(typing, ChatMessage(isUser: false, text: parsed.text, autoLearnSkill: parsed.autoLearnSkill));
         _saveHistory();
@@ -1011,7 +1026,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     } catch (e) {
       // Fallback ke /chat kalau /agent gagal
       try {
-        final reply = await widget.api.sendChat(history: _cleanHistory(), model: model, cancelToken: cancelToken);
+        final reply = await widget.api.sendChat(history: _cleanHistory(), model: model, cancelToken: cancelToken, incognito: _incognito);
         final parsed = _extractAutoLearn(reply);
         _resolveTyping(typing, ChatMessage(isUser: false, text: parsed.text, autoLearnSkill: parsed.autoLearnSkill));
         _saveHistory();
@@ -1402,6 +1417,18 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
                 ),
               ],
             ),
+            if (_incognito) ...[
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: JeonColors.accent.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: const Text('Incognito',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: JeonColors.accent)),
+              ),
+            ],
           ],
         ),
         actions: [
@@ -1483,6 +1510,26 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
                       ),
                     ),
                 ],
+              ),
+            ),
+          ),
+          // Toggle Incognito Mode — sengaja ditaruh sebagai baris tersendiri
+          // tepat di atas composer (bukan di dalam JeonChatInputBar) supaya
+          // baris pill input yang sudah ada di input_bar.dart tidak perlu
+          // diubah sama sekali.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: IconButton(
+                visualDensity: VisualDensity.compact,
+                icon: Icon(
+                  _incognito ? Icons.visibility_off : Icons.visibility_off_outlined,
+                  size: 18,
+                  color: _incognito ? JeonColors.accent : JeonColors.inkMuted,
+                ),
+                tooltip: 'Mode Incognito: chat tidak disimpan',
+                onPressed: () => setState(() => _incognito = !_incognito),
               ),
             ),
           ),
