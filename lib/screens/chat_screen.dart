@@ -42,9 +42,14 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
   String _lastModel = ApiService.fallbackModelOptions.first.value;
 
   // ---- Stop Generation — hanya menutupi jalur /chat & /agent
-  // (_handleChatRequest, _handleCostRequest); handler lain (media gen, web
-  // search, dsb) di luar cakupan permintaan fitur ini. ----
-  bool _isGenerating = false;
+  // (_handleChatRequest, _handleCostRequest, _regenerateMessage); handler
+  // lain (media gen, web search, dsb) di luar cakupan permintaan fitur ini.
+  // Counter (bukan bool tunggal) — kalau 2 request /chat-/agent kebetulan
+  // tumpang tindih (mis. regenerate dipicu selagi kirim lain masih jalan),
+  // tombol Stop harus tetap tampil sampai SEMUANYA selesai, bukan hilang
+  // begitu SALAH SATU selesai duluan. ----
+  int _generatingCount = 0;
+  bool get _isGenerating => _generatingCount > 0;
   CancelToken? _activeCancelToken;
 
   // ---- Drag & drop file ke area chat (web/desktop) — hasil upload didorong
@@ -285,10 +290,20 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     }
   }
 
+  /// Jaring pengaman: buang placeholder "Sedang berpikir" yang mungkin
+  /// kejaring tersimpan dari SEBELUM fix di _saveHistory() ada (data lama).
+  /// Placeholder ini murni state UI sementara — tidak pernah valid untuk
+  /// tampil lagi setelah reload/pindah percakapan, karena pada titik itu
+  /// SUDAH PASTI tidak ada request yang benar-benar sedang berjalan lagi
+  /// untuk menyelesaikannya (lihat bug: bubble loading nyangkut permanen).
   List<ChatMessage> _messagesFromConversation(Map<String, dynamic>? conv) {
     final raw = conv?['messages'];
     if (raw is! List) return [];
-    return raw.whereType<Map<String, dynamic>>().map(ChatMessage.fromJson).toList();
+    return raw
+        .whereType<Map<String, dynamic>>()
+        .map(ChatMessage.fromJson)
+        .where((m) => m.text != _thinkingText)
+        .toList();
   }
 
   /// Load daftar semua percakapan lalu buka yang paling baru — bikin satu
@@ -391,10 +406,22 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
 
   /// Dipanggil di setiap titik yang tadinya panggil "_saveHistory()" —
   /// simpan pesan-pesan ke percakapan aktif lalu segarkan daftar sidebar.
+  ///
+  /// PENTING: placeholder "Sedang berpikir" (typing) SENGAJA tidak ikut
+  /// disimpan — _send() memanggil ini SEBELUM request selesai (supaya pesan
+  /// user tidak hilang kalau tab ditutup), jadi placeholder-nya masih ada
+  /// di _messages saat ini jalan. Kalau ikut tersimpan dan requestnya tidak
+  /// pernah sempat resolve (tab ditutup/refresh di tengah jalan, request
+  /// gagal lewat jalur yang tidak ketangkep try/catch), bubble "Sedang
+  /// berpikir..." itu akan nyangkut PERMANEN di storage & tampil lagi setiap
+  /// kali percakapan ini dibuka ulang — walau tidak ada request yang benar-
+  /// benar berjalan lagi (lihat juga _messagesFromConversation, jaring
+  /// pengaman kedua untuk data lama yang mungkin sudah kejadian ini).
   Future<void> _saveHistory() async {
     final id = _conversationId;
     if (id == null) return;
-    await ChatHistoryService.saveConversation(id, _messages, agentSession: _agentSession);
+    final persisted = _messages.where((m) => m.text != _thinkingText).toList();
+    await ChatHistoryService.saveConversation(id, persisted, agentSession: _agentSession);
     final list = await ChatHistoryService.listConversations();
     if (!mounted) return;
     setState(() => _conversations = list);
@@ -670,18 +697,26 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
   void _resolveTyping(ChatMessage typing, ChatMessage reply) {
     setState(() {
       final idx = _messages.indexWhere((m) => identical(m, typing));
+      List<ChatMessage> updated;
       if (idx == -1) {
-        _messages = [..._messages, reply];
+        updated = [..._messages, reply];
       } else {
-        _messages = [
+        updated = [
           ..._messages.sublist(0, idx),
           reply,
           ..._messages.sublist(idx + 1),
         ];
       }
-      // Aman dipanggil dari handler mana pun (cuma _handleChatRequest &
-      // _handleCostRequest yang pernah men-set true) — idempoten kalau sudah false.
-      _isGenerating = false;
+      // Jaring pengaman tambahan: buang placeholder "Sedang berpikir" LAIN
+      // yang mungkin lolos (mis. identical() di atas gagal cocok karena
+      // sebab tak terduga) — tidak pernah valid ada placeholder tampil
+      // tanpa proses aktif yang bakal menyelesaikannya (lihat bug: loading
+      // nyangkut permanen walau jawaban baru sudah muncul di bawahnya).
+      _messages = updated.where((m) => identical(m, reply) || m.text != _thinkingText).toList();
+      // Aman dipanggil dari handler mana pun (banyak yang tidak pernah
+      // increment _generatingCount sama sekali, mis. media/search/doc) —
+      // dijaga tidak pernah turun di bawah 0.
+      if (_generatingCount > 0) _generatingCount--;
       _activeCancelToken = null;
     });
     _maybeSpeak(reply);
@@ -797,6 +832,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
   /// via _send() biasa (jalur deteksi media/search/dsb tetap berlaku sama
   /// seperti pesan baru pada umumnya).
   Future<void> _editUserMessage(ChatMessage message, String newText) async {
+    if (_isGenerating) return; // Cegah edit+kirim ulang selagi ada generasi lain berjalan.
     final idx = _messages.indexWhere((m) => identical(m, message));
     if (idx == -1) return;
     setState(() => _messages = _messages.sublist(0, idx));
@@ -819,7 +855,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     _scrollToBottom();
     final cancelToken = CancelToken();
     setState(() {
-      _isGenerating = true;
+      _generatingCount++;
       _activeCancelToken = cancelToken;
     });
     try {
@@ -839,7 +875,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
   Future<void> _handleCostRequest(String model, ChatMessage typing) async {
     final cancelToken = CancelToken();
     setState(() {
-      _isGenerating = true;
+      _generatingCount++;
       _activeCancelToken = cancelToken;
     });
     try {
@@ -932,7 +968,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       {String? imageUrl, String? attachmentUrl}) async {
     final cancelToken = CancelToken();
     setState(() {
-      _isGenerating = true;
+      _generatingCount++;
       _activeCancelToken = cancelToken;
     });
     try {
