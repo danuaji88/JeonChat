@@ -127,7 +127,7 @@ class _SocialLoginButtonsState extends State<SocialLoginButtons> {
   Future<void> _loginWithTikTok() async {
     setState(() => _loadingProvider = 'tiktok');
     try {
-      var clientKey = 'aw27pjwlycofh586';
+      var clientKey = 'sbawa4ub8q0th6v024';
       var redirectUri = 'https://chat.jeonlive.com/auth/tiktok/callback';
       try {
         final cfg = await widget.api.fetchSocialConfig();
