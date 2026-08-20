@@ -627,9 +627,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
       if (result == null || result.files.isEmpty) return;
       for (final file in result.files) {
         final bytes = file.bytes;
-        if (bytes == null) {
+        if (bytes == null || bytes.isEmpty) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Tidak bisa membaca isi file.')),
+            SnackBar(content: Text('File "${file.name}" gagal dibaca (kosong) — coba pilih ulang file ini.')),
           );
           continue;
         }
@@ -650,9 +650,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
         const SnackBar(content: Text('File berhasil diupload ke server.')),
       );
     } catch (e) {
+      debugPrint('Upload file gagal: $e');
       if (!mounted) return;
+      final friendly = e.toString().contains('file_kosong')
+          ? 'File gagal diupload (kosong) — coba pilih ulang file yang berbeda atau refresh halaman lalu coba lagi.'
+          : 'Gagal upload file: $e';
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Gagal upload file: $e')),
+        SnackBar(content: Text(friendly)),
       );
     }
   }
