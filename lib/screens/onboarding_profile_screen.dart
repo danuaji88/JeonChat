@@ -31,21 +31,30 @@ class _OnboardingProfileScreenState extends State<OnboardingProfileScreen> {
   @override
   void initState() {
     super.initState();
+    // profile.displayName kosong ('') untuk user baru (lihat
+    // ProfileService.loadFromPrefs) — field ini sengaja mulai kosong, bukan
+    // diisi nama default statis. Terisi otomatis cuma kalau memang sudah ada
+    // nama tersimpan (mis. saat Edit Profil).
     _nameController.text = widget.profile.displayName;
     _selectedAvatar = widget.profile.avatarEmoji;
+    _nameController.addListener(_onNameChanged);
   }
+
+  void _onNameChanged() => setState(() {});
+
+  bool get _canContinue => _nameController.text.trim().isNotEmpty;
 
   @override
   void dispose() {
+    _nameController.removeListener(_onNameChanged);
     _nameController.dispose();
     super.dispose();
   }
 
   Future<void> _continue() async {
-    if (_saving) return;
+    if (_saving || !_canContinue) return;
     setState(() => _saving = true);
-    widget.profile.displayName =
-        _nameController.text.trim().isEmpty ? 'Appa Jeon' : _nameController.text.trim();
+    widget.profile.displayName = _nameController.text.trim();
     widget.profile.avatarEmoji = _selectedAvatar;
     await widget.profile.save();
     if (!mounted) return;
@@ -136,7 +145,7 @@ class _OnboardingProfileScreenState extends State<OnboardingProfileScreen> {
                   controller: _nameController,
                   style: const TextStyle(fontSize: 13.5, color: JeonColors.ink),
                   decoration: InputDecoration(
-                    hintText: 'Appa Jeon',
+                    hintText: 'Masukkan nama kamu',
                     hintStyle: const TextStyle(color: JeonColors.inkFaint),
                     filled: true,
                     fillColor: JeonColors.surface2,
@@ -161,7 +170,7 @@ class _OnboardingProfileScreenState extends State<OnboardingProfileScreen> {
                 SizedBox(
                   height: 46,
                   child: ElevatedButton(
-                    onPressed: _saving ? null : _continue,
+                    onPressed: (_saving || !_canContinue) ? null : _continue,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: JeonColors.accent,
                       foregroundColor: const Color(0xFF04150A),

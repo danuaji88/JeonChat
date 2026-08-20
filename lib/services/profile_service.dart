@@ -20,7 +20,7 @@ class ProfileService {
   static Future<ProfileService> loadFromPrefs() async {
     final prefs = await SharedPreferences.getInstance();
     return ProfileService(
-      displayName: prefs.getString(_kName) ?? 'Appa Jeon',
+      displayName: prefs.getString(_kName) ?? '',
       avatarEmoji: prefs.getString(_kAvatar) ?? '🙂',
       onboarded: prefs.getBool(_kOnboarded) ?? false,
     );
