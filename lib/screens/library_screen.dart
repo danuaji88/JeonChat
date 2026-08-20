@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/message.dart';
+import '../services/api_service.dart';
 import '../services/chat_history_service.dart';
 import '../widgets/audio_message_player.dart';
 
@@ -49,8 +50,9 @@ class LibraryItem {
 class LibraryScreen extends StatefulWidget {
   final String? folderId;
   final String? folderName;
+  final ApiService? api;
 
-  const LibraryScreen({super.key, this.folderId, this.folderName});
+  const LibraryScreen({super.key, this.folderId, this.folderName, this.api});
 
   @override
   State<LibraryScreen> createState() => _LibraryScreenState();
@@ -270,6 +272,41 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   String _fmtDate(DateTime d) => '${_monthNames[d.month - 1]} ${d.day}';
 
+  Future<void> _renameCustomItem(String id) async {
+    final idx = _customItems.indexWhere((c) => c['id'] == id);
+    if (idx == -1) return;
+    final currentName = (_customItems[idx]['name'] ?? '').toString();
+    final newName = await _askNameDialog(currentName, 'Ubah nama');
+    if (newName == null || newName.isEmpty) return;
+    final updated = [..._customItems];
+    updated[idx] = {...updated[idx], 'name': newName};
+    await _saveCustomItems(updated);
+    if (!mounted) return;
+    setState(() {
+      _customItems = updated;
+      _items = _items.map((i) => i.id == id ? LibraryItem(
+        id: i.id,
+        name: newName,
+        type: i.type,
+        url: i.url,
+        modified: i.modified,
+        size: i.size,
+        content: i.content,
+        parentId: i.parentId,
+      ) : i).toList();
+    });
+  }
+
+  Future<void> _removeCustomItem(String id) async {
+    final updated = _customItems.where((c) => c['id'] != id).toList();
+    await _saveCustomItems(updated);
+    if (!mounted) return;
+    setState(() {
+      _customItems = updated;
+      _items = _items.where((i) => i.id != id).toList();
+    });
+  }
+
   List<LibraryItem> get _filtered {
     var list = _items.where((i) => i.parentId == widget.folderId).toList();
     switch (_filter) {
@@ -468,12 +505,70 @@ class _LibraryScreenState extends State<LibraryScreen> {
     }
   }
 
-  Future<void> _createTextItem(String type, String baseName) => _addCustomItem(
-        id: 'lib_${DateTime.now().millisecondsSinceEpoch}',
-        name: baseName,
-        type: type,
-        size: '0 KB',
-      );
+  Future<void> _createTextItem(String type, String baseName) async {
+    // Minta nama dulu (ala New Folder) — kalau kosong pakai nama default.
+    final name = await _askNameDialog(baseName, 'Nama ${_typeLabel(type)}');
+    if (name == null) return; // Batal
+    await _addCustomItem(
+      id: 'lib_${DateTime.now().millisecondsSinceEpoch}',
+      name: name.isEmpty ? baseName : name,
+      type: type,
+      size: '0 KB',
+    );
+  }
+
+  String _typeLabel(String type) {
+    switch (type) {
+      case 'note':
+        return 'catatan';
+      case 'document':
+        return 'dokumen';
+      case 'spreadsheet':
+        return 'spreadsheet';
+      default:
+        return 'file';
+    }
+  }
+
+  /// Dialog input nama (dipakai New Note/Document/Spreadsheet & rename).
+  /// Return null jika batal, string (mungkin kosong) jika OK.
+  Future<String?> _askNameDialog(String initial, String title) async {
+    final controller = TextEditingController(text: initial);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF171717),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: Text(title, style: const TextStyle(color: _ink, fontSize: 15.5)),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: const TextStyle(color: _ink, fontSize: 13.5),
+          decoration: InputDecoration(
+            hintText: 'Nama',
+            hintStyle: const TextStyle(color: _inkMuted),
+            filled: true,
+            fillColor: const Color(0xFF262626),
+            isDense: true,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+          ),
+          onSubmitted: (v) => Navigator.of(context).pop(v),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Batal', style: TextStyle(color: _inkMuted)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+            child: const Text('Simpan', style: TextStyle(color: _ink)),
+          ),
+        ],
+      ),
+    );
+    return result;
+  }
 
   Future<void> _createFolderDialog() async {
     final controller = TextEditingController();
@@ -520,17 +615,40 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   Future<void> _uploadFiles() async {
+    final api = widget.api;
+    if (api == null || !api.isLoggedIn) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Login dulu untuk upload file.')),
+      );
+      return;
+    }
     try {
-      final result = await FilePicker.platform.pickFiles(type: FileType.any, allowMultiple: true);
-      if (result == null) return;
+      final result = await FilePicker.platform.pickFiles(type: FileType.any, allowMultiple: true, withData: true);
+      if (result == null || result.files.isEmpty) return;
       for (final file in result.files) {
+        final bytes = file.bytes;
+        if (bytes == null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Tidak bisa membaca isi file.')),
+          );
+          continue;
+        }
+        // Upload beneran ke server → dapatkan URL publik.
+        final up = await api.uploadFile(name: file.name, bytes: bytes);
+        final url = (up['url'] ?? '').toString();
+        final sizeLabel = _formatBytes(file.size);
         await _addCustomItem(
           id: 'lib_${DateTime.now().millisecondsSinceEpoch}_${file.name}',
           name: file.name,
           type: 'upload',
-          size: _formatBytes(file.size),
+          size: sizeLabel,
+          content: url, // simpan URL sebagai referensi
         );
       }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('File berhasil diupload ke server.')),
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -640,6 +758,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
   Widget _row(LibraryItem item, bool isWide) {
     final content = InkWell(
       onTap: () => _openItem(item),
+      onLongPress: item.isCustom
+          ? () => _showItemMenu(item)
+          : null,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         child: Row(
@@ -660,6 +781,21 @@ class _LibraryScreenState extends State<LibraryScreen> {
               child:
                   Text(item.size, textAlign: TextAlign.end, style: const TextStyle(fontSize: 12, color: _inkMuted)),
             ),
+            if (item.isCustom)
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert, size: 18, color: _inkMuted),
+                padding: EdgeInsets.zero,
+                color: const Color(0xFF2A2A2A),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                onSelected: (v) {
+                  if (v == 'rename') _renameCustomItem(item.id!);
+                  if (v == 'delete') _removeCustomItem(item.id!);
+                },
+                itemBuilder: (context) => const [
+                  PopupMenuItem(value: 'rename', height: 40, child: Text('Ubah nama', style: TextStyle(fontSize: 13.5, color: Colors.white))),
+                  PopupMenuItem(value: 'delete', height: 40, child: Text('Hapus', style: TextStyle(fontSize: 13.5, color: Color(0xFFFF6B6B)))),
+                ],
+              ),
           ],
         ),
       ),
@@ -668,6 +804,31 @@ class _LibraryScreenState extends State<LibraryScreen> {
       return _FadeIn(key: ValueKey('fade_${item.id}'), child: content);
     }
     return KeyedSubtree(key: ValueKey(item.id ?? '${item.type}_${item.url}_${item.modified.millisecondsSinceEpoch}'), child: content);
+  }
+
+  void _showItemMenu(LibraryItem item) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF171717),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.edit_outlined, color: Colors.white),
+              title: const Text('Ubah nama', style: TextStyle(color: Colors.white)),
+              onTap: () { Navigator.of(context).pop(); _renameCustomItem(item.id!); },
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline, color: Color(0xFFFF6B6B)),
+              title: const Text('Hapus', style: TextStyle(color: Color(0xFFFF6B6B))),
+              onTap: () { Navigator.of(context).pop(); _removeCustomItem(item.id!); },
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _thumbnail(LibraryItem item) {
@@ -721,7 +882,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
         _openFolder(item);
         break;
       case 'upload':
-        _openInfo(item, 'File yang di-upload (referensi lokal, belum ada penyimpanan cloud):');
+        // Upload kini punya URL publik di content → buka/tampilkan link-nya.
+        final url = (item.content != null && item.content!.isNotEmpty) ? item.content! : item.url;
+        if (url.isNotEmpty) {
+          _openInfo(item, 'File terupload. Link unduh:');
+        } else {
+          _openInfo(item, 'File yang di-upload (belum ada link):');
+        }
         break;
       default:
         _openInfo(item, 'File tersimpan di server:');
@@ -741,7 +908,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   void _openFolder(LibraryItem item) {
     Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => LibraryScreen(folderId: item.id, folderName: item.name),
+      builder: (_) => LibraryScreen(folderId: item.id, folderName: item.name, api: widget.api),
     ));
   }
 
@@ -804,6 +971,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   void _openInfo(LibraryItem item, String label) {
+    final displayUrl = item.url.isNotEmpty
+        ? item.url
+        : ((item.content != null && item.content!.startsWith('http')) ? item.content! : item.name);
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -818,7 +988,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
             children: [
               Text(label, style: const TextStyle(color: _inkMuted, fontSize: 12.5)),
               const SizedBox(height: 8),
-              SelectableText(item.url.isEmpty ? item.name : item.url,
+              SelectableText(displayUrl,
                   style: const TextStyle(color: _ink, fontSize: 12.8)),
             ],
           ),

@@ -1095,7 +1095,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       onOpenLibrary: () {
         if (!isWide) Navigator.of(context).maybePop();
         _requireAuth(() {
-          Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LibraryScreen()));
+          Navigator.of(context).push(MaterialPageRoute(builder: (_) => LibraryScreen(api: widget.api)));
         });
       },
       onOpenPlugins: () {

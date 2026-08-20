@@ -214,6 +214,23 @@ class ApiService {
         : <String, dynamic>{};
   }
 
+  /// Upload file biner nyata ke server → /upload/file. [name] = nama file,
+  /// [bytes] = isi mentah. Mengembalikan {name, url, size, status}.
+  Future<Map<String, dynamic>> uploadFile({required String name, required List<int> bytes}) async {
+    final res = await http
+        .post(
+          _uri('/upload/file'),
+          headers: _headers,
+          body: jsonEncode({'name': name, 'data_base64': base64Encode(bytes)}),
+        )
+        .timeout(const Duration(seconds: 60), onTimeout: () => throw ApiException('Timeout: upload melebihi 60 detik.'));
+    if (res.statusCode != 200) {
+      throw ApiException('Upload gagal (${res.statusCode}): ${res.body}');
+    }
+    final data = jsonDecode(res.body);
+    return (data is Map<String, dynamic>) ? data : <String, dynamic>{};
+  }
+
   /// Langkah 1 login WhatsApp/HP — minta OTP dikirim ke [phone]. Respons:
   /// {ok, message, dev_hint, expires_in} — dev_hint = OTP sementara selama
   /// belum ada gateway SMS/WA asli.
