@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import '../services/profile_service.dart';
 import '../theme.dart';
+import '../utils/oauth_redirect.dart';
 import 'chat_screen.dart';
 import 'login_screen.dart';
 import 'onboarding_profile_screen.dart';
@@ -44,10 +45,31 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
     ]);
     final api = results[0] as ApiService;
     final profile = results[1] as ProfileService;
+
+    // Landing dari redirect OAuth (GitHub/TikTok) — backend tukar code →
+    // token lalu redirect ke .../app/#token=...&email=... (sukses) atau
+    // .../app/?error=... (gagal). SplashScreen selalu jadi entry point
+    // pertama tiap kali browser reload halaman, jadi dibaca sekali di sini.
+    String? authError = Uri.base.queryParameters['error'];
+    final fragment = Uri.base.fragment;
+    if (fragment.isNotEmpty) {
+      final params = Uri.splitQueryString(fragment);
+      final incomingToken = params['token'];
+      if (incomingToken != null && incomingToken.isNotEmpty) {
+        try {
+          await api.restoreSocialSession(incomingToken);
+          authError = null;
+        } catch (e) {
+          authError = e.toString();
+        }
+      }
+      clearOAuthRedirectFragment();
+    }
+
     if (!mounted) return;
     Widget target;
     if (!api.isAuthenticated) {
-      target = LoginScreen(api: api);
+      target = LoginScreen(api: api, initialError: authError);
     } else if (!profile.onboarded) {
       target = OnboardingProfileScreen(api: api, profile: profile);
     } else {

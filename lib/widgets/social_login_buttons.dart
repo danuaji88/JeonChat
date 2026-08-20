@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
@@ -9,16 +10,17 @@ import '../theme.dart';
 /// POST hasil token ke ApiService.socialLogin() (/auth/social) atau
 /// phoneRequestOtp/phoneVerifyOtp() (/auth/phone, /auth/phone/verify).
 ///
-/// Google beneran jalan lewat package google_sign_in (butuh Client ID resmi
-/// dikonfigurasi di project Google Cloud Console — di luar akses kode ini).
-/// GitHub jalan lewat Personal Access Token manual (OAuth App penuh butuh
-/// Client ID/Secret server-side yang belum ada). WhatsApp jalan lewat alur
-/// OTP 2 langkah (/auth/phone → /auth/phone/verify, dev_hint dipakai selama
-/// belum ada gateway SMS/WA asli). TikTok, Facebook & Instagram belum ada
-/// SDK/App ID yang bisa dipasang dengan aman tanpa kredensial asli (Facebook
-/// SDK khususnya bisa bikin build Android crash saat start kalau meta-data
-/// App ID tidak ada di AndroidManifest) — jadi tombolnya jujur menampilkan
-/// "belum dikonfigurasi", bukan pura-pura jalan.
+/// Google jalan lewat package google_sign_in (client_id GIS dikonfigurasi di
+/// web/index.html). Facebook jalan lewat package flutter_facebook_auth (SDK
+/// JS di-init lazy saat tombol ditekan, appId dari /auth/social/config).
+/// GitHub & TikTok jalan lewat redirect OAuth browser (client_id/redirect_uri
+/// dari /auth/social/config) — backend tukar code → token lalu redirect ke
+/// .../app/#token=..., dibaca SplashScreen._init() (lihat lib/utils/
+/// oauth_redirect.dart untuk pembersihan hash-nya). WhatsApp jalan lewat
+/// alur OTP 2 langkah (/auth/phone → /auth/phone/verify, dev_hint dipakai
+/// selama belum ada gateway SMS/WA asli). Instagram belum ada App ID yang
+/// dikonfigurasi di server — tombolnya jujur menampilkan "belum
+/// dikonfigurasi", bukan pura-pura jalan.
 class SocialLoginButtons extends StatefulWidget {
   final ApiService api;
   final VoidCallback onSuccess;
@@ -95,53 +97,90 @@ class _SocialLoginButtonsState extends State<SocialLoginButtons> {
     }
   }
 
+  /// GitHub OAuth — sama pola dengan TikTok: buka halaman otorisasi GitHub
+  /// (client_id publik dari /auth/social/config, fallback ke nilai default
+  /// kalau config gagal diambil), redirect balik ke callback server →
+  /// #token=... → dibaca SplashScreen._init().
   Future<void> _loginWithGitHub() async {
     setState(() => _loadingProvider = 'github');
     try {
-      final tokenController = TextEditingController();
-      final token = await showDialog<String>(
-        context: context,
-        builder: (ctx) => _premiumDialog(
-          title: 'Masuk dengan GitHub',
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Masukkan GitHub Personal Access Token.',
-                  style: TextStyle(color: JeonColors.inkFaint, fontSize: 13, height: 1.4)),
-              const SizedBox(height: 4),
-              const Text('Buat di github.com/settings/tokens — scope: read:user, user:email',
-                  style: TextStyle(color: JeonColors.inkFaint, fontSize: 11, height: 1.4)),
-              const SizedBox(height: 12),
-              TextField(
-                controller: tokenController,
-                obscureText: true,
-                autofocus: true,
-                style: const TextStyle(color: JeonColors.ink, fontSize: 13.5),
-                decoration: _dialogFieldDecoration('ghp_...'),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Batal', style: TextStyle(color: JeonColors.inkFaint)),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(tokenController.text.trim()),
-              child: const Text('Masuk', style: TextStyle(color: JeonColors.accent, fontWeight: FontWeight.w600)),
-            ),
-          ],
-        ),
+      var clientId = 'Ov23liIXOE1ajl3fchAh';
+      var redirectUri = 'https://chat.jeonlive.com/auth/github/callback';
+      try {
+        final cfg = await widget.api.fetchSocialConfig();
+        final gh = cfg['github'] as Map<String, dynamic>?;
+        final cid = gh?['client_id']?.toString() ?? '';
+        final ruri = gh?['redirect_uri']?.toString() ?? '';
+        if (cid.isNotEmpty) clientId = cid;
+        if (ruri.isNotEmpty) redirectUri = ruri;
+      } catch (_) {
+        // Config server gagal diambil — tetap coba pakai nilai default di atas.
+      }
+      final authUrl = 'https://github.com/login/oauth/authorize'
+          '?client_id=$clientId'
+          '&redirect_uri=${Uri.encodeComponent(redirectUri)}'
+          '&scope=${Uri.encodeComponent('read:user user:email')}';
+      final ok = await launchUrlString(authUrl, mode: LaunchMode.externalApplication);
+      if (!ok && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Gagal membuka halaman login GitHub.')),
+        );
+      }
+      // Tab baru terbuka ke GitHub → user login di sana → redirect balik ke
+      // backend → app (dibaca SplashScreen). Tab ini sendiri tetap idle.
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Login GitHub gagal: $e')),
       );
-      if (token == null || token.isEmpty || !mounted) return;
-      await widget.api.socialLogin(provider: 'github', token: token);
+    } finally {
+      if (mounted) setState(() => _loadingProvider = null);
+    }
+  }
+
+  /// Facebook — package flutter_facebook_auth. SDK JS (web) di-init lazy di
+  /// sini (bukan di main()) supaya user yang tidak pernah pakai Facebook
+  /// tidak kena biaya network call itu; appId dari /auth/social/config,
+  /// fallback ke nilai default kalau config gagal diambil.
+  Future<void> _loginWithFacebook() async {
+    setState(() => _loadingProvider = 'facebook');
+    try {
+      if (!FacebookAuth.i.isWebSdkInitialized) {
+        var appId = '1057222590048711';
+        try {
+          final cfg = await widget.api.fetchSocialConfig();
+          final fb = cfg['facebook'] as Map<String, dynamic>?;
+          final cid = fb?['app_id']?.toString() ?? '';
+          if (cid.isNotEmpty) appId = cid;
+        } catch (_) {
+          // Config server gagal diambil — tetap coba pakai nilai default di atas.
+        }
+        await FacebookAuth.i.webAndDesktopInitialize(
+          appId: appId,
+          cookie: true,
+          xfbml: false,
+          version: 'v23.0',
+        );
+      }
+      final result = await FacebookAuth.i.login(
+        permissions: const ['email', 'public_profile'],
+        loginTracking: LoginTracking.enabled,
+      );
+      if (result.status == LoginStatus.cancelled) return; // User batal.
+      if (result.status != LoginStatus.success) {
+        throw Exception(result.message ?? 'Login Facebook gagal');
+      }
+      final accessToken = result.accessToken?.tokenString ?? '';
+      if (accessToken.isEmpty) {
+        throw Exception('Access token Facebook tidak tersedia');
+      }
+      await widget.api.socialLogin(provider: 'facebook', token: accessToken);
       if (!mounted) return;
       widget.onSuccess();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Login gagal, coba lagi.')),
+        SnackBar(content: Text('Login Facebook gagal: $e')),
       );
     } finally {
       if (mounted) setState(() => _loadingProvider = null);
@@ -337,6 +376,7 @@ class _SocialLoginButtonsState extends State<SocialLoginButtons> {
           fg: Colors.black87,
           border: JeonColors.border,
           onTap: _loading ? null : _loginWithGoogle,
+          loading: _loadingProvider == 'google',
           leading: const Text('G',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF4285F4))),
         ),
@@ -358,7 +398,8 @@ class _SocialLoginButtonsState extends State<SocialLoginButtons> {
           bg: const Color(0xFF1877F2),
           fg: Colors.white,
           border: const Color(0xFF1877F2),
-          onTap: _loading ? null : () => _showNotConfigured('Facebook'),
+          onTap: _loading ? null : _loginWithFacebook,
+          loading: _loadingProvider == 'facebook',
           leading: const Icon(Icons.facebook_rounded, size: 18, color: Colors.white),
         ),
         const SizedBox(height: 10),

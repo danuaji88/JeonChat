@@ -25,5 +25,13 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- flutter_facebook_auth (login sosial Facebook) — App ID wajib ada
+             di sini, kalau tidak Facebook SDK crash saat app start di Android
+             (auto-init lewat ContentProvider, jalan walau tombol Facebook
+             tidak pernah ditekan). Client token tidak diset (belum tersedia)
+             — cukup untuk login, belum untuk fitur Graph API lanjutan. -->
+        <meta-data
+            android:name="com.facebook.sdk.ApplicationId"
+            android:value="@string/facebook_app_id" />
     </application>
 </manifest>

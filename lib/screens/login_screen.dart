@@ -10,7 +10,11 @@ import 'onboarding_profile_screen.dart';
 class LoginScreen extends StatefulWidget {
   final ApiService api;
 
-  const LoginScreen({super.key, required this.api});
+  /// Pesan error dari redirect OAuth (GitHub/TikTok) yang gagal — lihat
+  /// SplashScreen._init(), diisi dari ?error=... atau validasi token gagal.
+  final String? initialError;
+
+  const LoginScreen({super.key, required this.api, this.initialError});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -29,6 +33,7 @@ class _LoginScreenState extends State<LoginScreen> {
     super.initState();
     // Server URL selalu pakai default (https://chat.jeonlive.com) — tidak perlu input manual.
     widget.api.baseUrl = ApiService.defaultBaseUrl;
+    _error = widget.initialError;
   }
 
   @override

@@ -172,6 +172,33 @@ class ApiService {
     return res;
   }
 
+  /// Simpan token dari redirect OAuth (fragment #token=... di URL setelah
+  /// backend tukar code → token → redirect ke .../app/#token=..., lihat
+  /// SplashScreen._init()) — validasi dulu ke POST /auth/me (body
+  /// {"token": ...}, bukan header Authorization — endpoint ini di server
+  /// cuma terdaftar sebagai POST) sebelum dipakai sebagai sesi aktif.
+  Future<Map<String, dynamic>> restoreSocialSession(String token) async {
+    final trimmed = token.trim();
+    if (trimmed.isEmpty) throw ApiException('Token kosong.');
+    if (!isConfigured) throw ApiException('Base URL belum diatur.');
+    final res = await http
+        .post(_uri('/auth/me'),
+            headers: const {'Content-Type': 'application/json'},
+            body: jsonEncode({'token': trimmed}))
+        .timeout(_shortTimeout, onTimeout: () => throw ApiException('Timeout: server tidak merespons.'));
+    if (res.statusCode == 401) {
+      throw ApiException('Sesi tidak valid atau sudah kedaluwarsa.');
+    }
+    if (res.statusCode != 200) {
+      throw ApiException('Verifikasi sesi gagal (${res.statusCode}).');
+    }
+    sessionToken = trimmed;
+    isGuest = false;
+    await saveToPrefs();
+    final data = jsonDecode(res.body);
+    return data is Map<String, dynamic> ? data : {'data': data};
+  }
+
   /// Konfigurasi publik login sosial (tanpa secret) — dipakai tombol OAuth
   /// (TikTok, dsb) untuk mengambil client_key & redirect_uri.
   Future<Map<String, dynamic>> fetchSocialConfig() async {
