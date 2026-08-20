@@ -47,9 +47,11 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
     final profile = results[1] as ProfileService;
 
     // Landing dari redirect OAuth (GitHub/TikTok) — backend tukar code →
-    // token lalu redirect ke .../app/#token=...&email=... (sukses) atau
-    // .../app/?error=... (gagal). SplashScreen selalu jadi entry point
-    // pertama tiap kali browser reload halaman, jadi dibaca sekali di sini.
+    // token lalu redirect ke .../app/#token=...&email=...&provider=...
+    // (sukses), atau .../app/?error=... (GitHub) / .../app/#error=...
+    // (TikTok) kalau gagal — dua provider ini beda konvensi utk error,
+    // jadi keduanya dibaca. SplashScreen selalu jadi entry point pertama
+    // tiap kali browser reload halaman, jadi dibaca sekali di sini.
     String? authError = Uri.base.queryParameters['error'];
     final fragment = Uri.base.fragment;
     if (fragment.isNotEmpty) {
@@ -62,6 +64,8 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
         } catch (e) {
           authError = e.toString();
         }
+      } else if (params['error'] != null && params['error']!.isNotEmpty) {
+        authError = params['error'];
       }
       clearOAuthRedirectFragment();
     }

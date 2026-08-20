@@ -61,37 +61,44 @@ class _SocialLoginButtonsState extends State<SocialLoginButtons> {
     }
   }
 
-  /// TikTok OAuth — buka halaman otorisasi TikTok (client_key publik dari
-  /// config server via /auth/social/config), redirect balik ke callback
-  /// server → #token=... → user login dengan token itu.
+  /// TikTok OAuth — sama pola dengan GitHub: buka halaman otorisasi TikTok
+  /// (client_key publik dari /auth/social/config, fallback ke nilai default
+  /// kalau config gagal diambil), redirect balik ke callback server →
+  /// #token=... → dibaca SplashScreen._init().
   Future<void> _loginWithTikTok() async {
     setState(() => _loadingProvider = 'tiktok');
     try {
-      final cfg = await widget.api.fetchSocialConfig();
-      final tk = cfg['tiktok'] as Map<String, dynamic>?;
-      final clientKey = tk?['client_key']?.toString() ?? '';
-      final redirectUri = tk?['redirect_uri']?.toString() ?? '';
-      if (clientKey.isEmpty || redirectUri.isEmpty) {
-        if (mounted) _showNotConfigured('TikTok');
-        return;
+      var clientKey = 'aw27pjwlycofh586';
+      var redirectUri = 'https://chat.jeonlive.com/auth/tiktok/callback';
+      try {
+        final cfg = await widget.api.fetchSocialConfig();
+        final tk = cfg['tiktok'] as Map<String, dynamic>?;
+        final ck = tk?['client_key']?.toString() ?? '';
+        final ruri = tk?['redirect_uri']?.toString() ?? '';
+        if (ck.isNotEmpty) clientKey = ck;
+        if (ruri.isNotEmpty) redirectUri = ruri;
+      } catch (_) {
+        // Config server gagal diambil — tetap coba pakai nilai default di atas.
       }
-      final state = DateTime.now().millisecondsSinceEpoch.toString();
       final authUrl = 'https://www.tiktok.com/v2/auth/authorize/'
           '?client_key=$clientKey'
-          '&response_type=code'
           '&scope=user.info.basic'
+          '&response_type=code'
           '&redirect_uri=${Uri.encodeComponent(redirectUri)}'
-          '&state=$state';
+          '&state=jeonchat';
       final ok = await launchUrlString(authUrl, mode: LaunchMode.externalApplication);
       if (!ok && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Gagal membuka halaman TikTok.')),
+          const SnackBar(content: Text('Gagal membuka halaman login TikTok.')),
         );
       }
-      // User diarahkan ke callback server → #token=... — halaman login
-      // akan menangkap token via URL (lihat LoginScreen._goNext/init).
+      // Tab baru terbuka ke TikTok → user login di sana → redirect balik ke
+      // backend → app (dibaca SplashScreen). Tab ini sendiri tetap idle.
     } catch (e) {
-      if (mounted) _showNotConfigured('TikTok');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Login TikTok gagal: $e')),
+      );
     } finally {
       if (mounted) setState(() => _loadingProvider = null);
     }
@@ -313,26 +320,6 @@ class _SocialLoginButtonsState extends State<SocialLoginButtons> {
     } finally {
       if (mounted) setState(() => _loadingProvider = null);
     }
-  }
-
-  void _showNotConfigured(String provider) {
-    showDialog(
-      context: context,
-      builder: (context) => _premiumDialog(
-        title: '$provider belum tersedia',
-        content: Text(
-          'Login $provider butuh App ID/Client ID resmi dari $provider yang belum dikonfigurasi di server ini. '
-          'Coba Google, GitHub, atau WhatsApp dulu ya.',
-          style: const TextStyle(color: JeonColors.inkFaint, fontSize: 13, height: 1.4),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Oke', style: TextStyle(color: JeonColors.accent, fontWeight: FontWeight.w600)),
-          ),
-        ],
-      ),
-    );
   }
 
   // ---- Dialog premium bersama: radius 16, shadow lembut, input filled
