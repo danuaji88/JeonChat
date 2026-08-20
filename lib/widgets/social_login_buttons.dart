@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
@@ -5,13 +8,20 @@ import 'package:url_launcher/url_launcher_string.dart';
 
 import '../services/api_service.dart';
 import '../theme.dart';
+import '../utils/google_button.dart';
 
 /// 6 tombol login sosial dipakai bareng oleh LoginScreen & AuthGateScreen —
 /// POST hasil token ke ApiService.socialLogin() (/auth/social) atau
 /// phoneRequestOtp/phoneVerifyOtp() (/auth/phone, /auth/phone/verify).
 ///
-/// Google jalan lewat package google_sign_in (client_id GIS dikonfigurasi di
-/// web/index.html). Facebook jalan lewat package flutter_facebook_auth (SDK
+/// Google: di web WAJIB pakai tombol GIS asli (buildGoogleRenderButton(),
+/// lihat lib/utils/google_button_web.dart) — signIn() imperatif di web cuma
+/// dapat access token, BUKAN idToken (dikonfirmasi langsung dari source
+/// google_sign_in_web: kredensial ber-idToken cuma keluar dari alur
+/// renderButton()/One Tap, ditangkap lewat GoogleSignIn().onCurrentUserChanged
+/// — lihat _onGoogleAccountChanged). Di Android/iOS, signIn() native tetap
+/// reliable dapat idToken, jadi tombol custom + _loginWithGoogle() tetap
+/// dipakai di sana. Facebook jalan lewat package flutter_facebook_auth (SDK
 /// JS di-init lazy saat tombol ditekan, appId dari /auth/social/config).
 /// GitHub & TikTok jalan lewat redirect OAuth browser (client_id/redirect_uri
 /// dari /auth/social/config) — backend tukar code → token lalu redirect ke
@@ -35,13 +45,62 @@ class _SocialLoginButtonsState extends State<SocialLoginButtons> {
   String? _loadingProvider;
   String? _pressedProvider;
 
+  // Satu instance persisten dipakai bersama oleh path native (_loginWithGoogle,
+  // signIn() imperatif) dan path web (listener onCurrentUserChanged di bawah)
+  // — bukan bikin instance baru tiap tap, supaya GIS SDK tidak re-init tiap klik.
+  late final GoogleSignIn _googleSignIn;
+  StreamSubscription<GoogleSignInAccount?>? _googleAccountSub;
+
   bool get _loading => _loadingProvider != null;
 
+  @override
+  void initState() {
+    super.initState();
+    _googleSignIn = GoogleSignIn(scopes: const ['email']);
+    if (kIsWeb) {
+      // renderButton() (tombol GIS asli) tidak bisa di-await langsung dari
+      // tap seperti signIn() — hasil suksesnya baru muncul lewat stream ini.
+      _googleAccountSub = _googleSignIn.onCurrentUserChanged.listen(_onGoogleAccountChanged);
+    }
+  }
+
+  @override
+  void dispose() {
+    _googleAccountSub?.cancel();
+    super.dispose();
+  }
+
+  /// Dipanggil setelah user berhasil pilih akun lewat tombol GIS asli
+  /// (buildGoogleRenderButton, web-only) — account di sini punya idToken
+  /// beneran karena datang dari credential response GIS, bukan access token.
+  Future<void> _onGoogleAccountChanged(GoogleSignInAccount? account) async {
+    if (account == null || !mounted) return;
+    setState(() => _loadingProvider = 'google');
+    try {
+      final auth = await account.authentication;
+      final idToken = auth.idToken;
+      if (idToken == null || idToken.isEmpty) {
+        throw Exception('ID token Google tidak tersedia');
+      }
+      await widget.api.socialLogin(provider: 'google', token: idToken, name: account.displayName ?? '');
+      if (!mounted) return;
+      widget.onSuccess();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Login Google gagal: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _loadingProvider = null);
+    }
+  }
+
+  /// Path native (Android/iOS) — signIn() imperatif reliable dapat idToken
+  /// di platform ini (beda dengan web, lihat dok class di atas).
   Future<void> _loginWithGoogle() async {
     setState(() => _loadingProvider = 'google');
     try {
-      final googleSignIn = GoogleSignIn(scopes: const ['email']);
-      final account = await googleSignIn.signIn();
+      final account = await _googleSignIn.signIn();
       if (account == null) return; // User batal di dialog Google.
       final auth = await account.authentication;
       final idToken = auth.idToken;
@@ -54,7 +113,7 @@ class _SocialLoginButtonsState extends State<SocialLoginButtons> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Login gagal, coba lagi.')),
+        SnackBar(content: Text('Login Google gagal: $e')),
       );
     } finally {
       if (mounted) setState(() => _loadingProvider = null);
@@ -356,17 +415,22 @@ class _SocialLoginButtonsState extends State<SocialLoginButtons> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _socialButton(
-          provider: 'google',
-          label: 'Masuk dengan Google',
-          bg: Colors.white,
-          fg: Colors.black87,
-          border: JeonColors.border,
-          onTap: _loading ? null : _loginWithGoogle,
-          loading: _loadingProvider == 'google',
-          leading: const Text('G',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF4285F4))),
-        ),
+        // Web WAJIB pakai tombol GIS asli (lihat dok class) — custom button
+        // cuma dipakai di Android/iOS di mana signIn() native tetap reliable.
+        if (kIsWeb)
+          SizedBox(height: 46, child: Center(child: buildGoogleRenderButton()))
+        else
+          _socialButton(
+            provider: 'google',
+            label: 'Masuk dengan Google',
+            bg: Colors.white,
+            fg: Colors.black87,
+            border: JeonColors.border,
+            onTap: _loading ? null : _loginWithGoogle,
+            loading: _loadingProvider == 'google',
+            leading: const Text('G',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF4285F4))),
+          ),
         const SizedBox(height: 10),
         _socialButton(
           provider: 'tiktok',
