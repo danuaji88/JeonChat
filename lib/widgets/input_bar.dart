@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -11,6 +12,7 @@ import 'package:speech_to_text/speech_to_text.dart';
 
 import '../services/api_service.dart' show ModelOption;
 import '../theme.dart';
+import '../utils/clipboard_paste.dart';
 
 /// Bottom input bar JeonChat — satu baris pill minimal:
 /// [+] [Ask JeonChat...] [model ▾] [🎤] [kirim / mode-suara].
@@ -27,6 +29,13 @@ class JeonChatInputBar extends StatefulWidget {
   /// (lihat _pendingAttachment & _attachmentPreview di bawah).
   final void Function(String text, String model,
       {String? attachmentUrl, String? attachmentName, String? attachmentKind}) onSend;
+
+  /// Fitur "Stop Generation" — saat true, tombol kirim (panah) berganti jadi
+  /// tombol Stop (kotak merah). [onStop] menggugurkan request /chat atau
+  /// /agent yang sedang berjalan (lihat _stopGeneration di chat_screen.dart).
+  final bool isGenerating;
+  final VoidCallback? onStop;
+
   final ValueChanged<String> onGenerateImage;
   final ValueChanged<String> onSearchWeb;
   final ValueChanged<String> onDeepResearch;
@@ -68,6 +77,13 @@ class JeonChatInputBar extends StatefulWidget {
   /// balikin daftar item mentah ({name, url, kind, size, uploaded_at}).
   final Future<List<Map<String, dynamic>>> Function() onFetchLibrary;
 
+  /// Kanal drag & drop (Fitur "Attach file di composer") — chat_screen.dart
+  /// upload file yang di-drop di area chat lalu dorong hasilnya
+  /// ({name, url, size}) ke sini lewat notifier ini, supaya jadi lampiran
+  /// pending yang SAMA persis dengan hasil Upload Gambar/Dokumen manual
+  /// (satu sumber kebenaran untuk preview+kirim, tidak duplikat UI).
+  final ValueListenable<Map<String, dynamic>?>? externalAttachment;
+
   /// "Code Interpreter" di menu "+" — parent yang push route-nya, biar bisa
   /// lewat auth gate dulu kayak Library/Plugins.
   final VoidCallback? onOpenCodeInterpreter;
@@ -91,6 +107,8 @@ class JeonChatInputBar extends StatefulWidget {
   const JeonChatInputBar({
     super.key,
     required this.onSend,
+    this.isGenerating = false,
+    this.onStop,
     required this.onGenerateImage,
     required this.onSearchWeb,
     required this.onDeepResearch,
@@ -103,6 +121,7 @@ class JeonChatInputBar extends StatefulWidget {
     required this.onUploadDoc,
     required this.onUploadAttachment,
     required this.onFetchLibrary,
+    this.externalAttachment,
     required this.onSpeechToText,
     this.activePluginCount = 0,
     this.onOpenPlugins,
@@ -158,6 +177,29 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
     });
     _initSpeech();
     _restoreSelectedModel();
+    // Paste gambar (Ctrl+V) — no-op di non-web (lihat clipboard_paste_stub.dart).
+    listenForImagePaste((name, bytes) => _uploadBytesAndAttach(name, bytes));
+    widget.externalAttachment?.addListener(_onExternalAttachment);
+  }
+
+  /// Drag & drop dari chat_screen.dart (lihat widget.externalAttachment) —
+  /// file sudah diupload di sana, di sini cuma dijadikan lampiran pending
+  /// yang sama seperti hasil Upload Gambar/Dokumen manual.
+  void _onExternalAttachment() {
+    final data = widget.externalAttachment?.value;
+    if (data == null) return;
+    final url = (data['url'] ?? '').toString();
+    if (url.isEmpty) return;
+    final name = (data['name'] ?? 'File').toString();
+    final sizeRaw = data['size'];
+    setState(() {
+      _pendingAttachment = _PendingAttachment(
+        name: name,
+        url: url,
+        kind: _inferAttachmentKind(name),
+        sizeLabel: sizeRaw is num ? _formatAttachmentSize(sizeRaw.toInt()) : null,
+      );
+    });
   }
 
   Future<void> _initSpeech() async {
@@ -209,6 +251,8 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
 
   @override
   void dispose() {
+    stopListeningForImagePaste();
+    widget.externalAttachment?.removeListener(_onExternalAttachment);
     _controller.dispose();
     _textFocusNode.dispose();
     _speech.stop();
@@ -218,6 +262,7 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
   }
 
   void _submit([String? preset]) {
+    if (widget.isGenerating) return; // Tombol sudah jadi Stop — Enter tidak boleh menembus.
     final text = (preset ?? _controller.text).trim();
     final attachment = _pendingAttachment;
     // Boleh kirim lampiran tanpa teks (ala WhatsApp/Telegram), tapi tidak
@@ -404,7 +449,7 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
     try {
       final result = await FilePicker.platform.pickFiles(type: FileType.image, withData: true);
       if (result == null || result.files.isEmpty) return;
-      await _uploadAndAttach(result.files.first);
+      await _uploadPlatformFile(result.files.first);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -427,7 +472,7 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
         withData: true,
       );
       if (result == null || result.files.isEmpty) return;
-      await _uploadAndAttach(result.files.first);
+      await _uploadPlatformFile(result.files.first);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -436,10 +481,7 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
     }
   }
 
-  /// Upload file yang sudah dipilih ke server (POST /upload/file lewat
-  /// parent) lalu jadikan lampiran pending — dipakai baik oleh Upload
-  /// Gambar maupun Upload File/Dokumen.
-  Future<void> _uploadAndAttach(PlatformFile file) async {
+  Future<void> _uploadPlatformFile(PlatformFile file) async {
     final bytes = file.bytes;
     if (bytes == null) {
       if (!mounted) return;
@@ -448,6 +490,16 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
       );
       return;
     }
+    await _uploadBytesAndAttach(file.name, bytes);
+  }
+
+  /// Upload file (bytes mentah) ke server (POST /upload/file lewat parent)
+  /// lalu jadikan lampiran pending — dipakai bareng oleh Upload Gambar,
+  /// Upload File/Dokumen, paste gambar dari clipboard (_onImagePasted), dan
+  /// drag & drop (lewat widget.externalAttachment dari chat_screen.dart,
+  /// yang uploadnya dilakukan di sana lalu didorong masuk sebagai attachment
+  /// jadi — lihat _onExternalAttachment).
+  Future<void> _uploadBytesAndAttach(String name, List<int> bytes) async {
     if (bytes.length > _maxUploadBytes) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -457,7 +509,7 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
     }
     setState(() => _attachmentBusy = true);
     try {
-      final up = await widget.onUploadAttachment(file.name, bytes);
+      final up = await widget.onUploadAttachment(name, bytes);
       final url = (up['url'] ?? '').toString();
       if (url.isEmpty) {
         throw Exception('Server tidak mengembalikan URL file');
@@ -465,9 +517,9 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
       if (!mounted) return;
       setState(() {
         _pendingAttachment = _PendingAttachment(
-          name: (up['name'] ?? file.name).toString(),
+          name: (up['name'] ?? name).toString(),
           url: url,
-          kind: _inferAttachmentKind(file.name),
+          kind: _inferAttachmentKind(name),
           sizeLabel: _formatAttachmentSize(bytes.length),
         );
       });
@@ -972,7 +1024,16 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
                   onPressed: _sttLoading ? null : _toggleMic,
                 ),
                 const SizedBox(width: 2),
-                if (_hasText || _pendingAttachment != null)
+                if (widget.isGenerating)
+                  Container(
+                    decoration: const BoxDecoration(color: JeonColors.danger, shape: BoxShape.circle),
+                    child: IconButton(
+                      icon: const Icon(Icons.stop_rounded, size: 17, color: Colors.white),
+                      tooltip: 'Hentikan',
+                      onPressed: widget.onStop,
+                    ),
+                  )
+                else if (_hasText || _pendingAttachment != null)
                   Container(
                     decoration: const BoxDecoration(color: JeonColors.accent, shape: BoxShape.circle),
                     child: IconButton(

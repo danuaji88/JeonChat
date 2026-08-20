@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
 import '../models/message.dart';
@@ -12,7 +13,7 @@ import 'video_message_player.dart';
 const _thinkingPlaceholder = 'JeonAI Sedang Berpikir Lalu Eksekusi Mohon Ditunggu';
 const _analysisGreen = Color(0xFF2ECC71);
 
-class ChatBubble extends StatelessWidget {
+class ChatBubble extends StatefulWidget {
   final ChatMessage message;
 
   /// Tombol "Lihat" di banner AutoLearn — buka SkillListScreen. Null kalau
@@ -23,13 +24,31 @@ class ChatBubble extends StatelessWidget {
   /// disediakan (tombol "Edit" di fullscreen disembunyikan).
   final void Function(String url)? onEditImage;
 
+  /// Edit pesan USER + kirim ulang (Fitur "Edit pesan") — dipanggil dengan
+  /// pesan asli & teks baru; parent (chat_screen.dart) yang motong history
+  /// dari titik itu lalu kirim ulang sebagai pesan baru. Null = tombol edit
+  /// disembunyikan.
+  final void Function(ChatMessage message, String newText)? onEditUserMessage;
+
+  /// Regenerate jawaban AI (Fitur "Regenerate") — dipanggil dengan bubble AI
+  /// yang mau digenerate ulang; parent yang hapus dari history & kirim ulang
+  /// pertanyaan sebelumnya. Null = tombol regenerate disembunyikan.
+  final void Function(ChatMessage message)? onRegenerateAiMessage;
+
   const ChatBubble({
     super.key,
     required this.message,
     this.onViewAutoLearnSkill,
     this.onEditImage,
+    this.onEditUserMessage,
+    this.onRegenerateAiMessage,
   });
 
+  @override
+  State<ChatBubble> createState() => _ChatBubbleState();
+}
+
+class _ChatBubbleState extends State<ChatBubble> {
   // Deteksi URL media (gambar/video) yang disisipkan AI langsung di teks
   // balasan — baik lewat sintaks markdown image maupun URL polos.
   static final _markdownImageRegex = RegExp(r'!\[[^\]]*\]\(([^)]+)\)');
@@ -37,6 +56,16 @@ class ChatBubble extends StatelessWidget {
       RegExp(r'https?://[^\s\)\]]+\.(jpg|jpeg|png|gif|webp)(\?[^\s]*)?', caseSensitive: false);
   static final _directVideoUrlRegex =
       RegExp(r'https?://[^\s\)\]]+\.(mp4|webm)(\?[^\s]*)?', caseSensitive: false);
+
+  // ---- Edit pesan user (lihat _startEdit/_cancelEdit/_confirmEdit) ----
+  bool _editing = false;
+  TextEditingController? _editController;
+
+  @override
+  void dispose() {
+    _editController?.dispose();
+    super.dispose();
+  }
 
   ({String url, bool isVideo})? _extractMediaUrl(String text) {
     final mdMatch = _markdownImageRegex.firstMatch(text);
@@ -55,8 +84,43 @@ class ChatBubble extends StatelessWidget {
     return null;
   }
 
+  void _startEdit() {
+    setState(() {
+      _editing = true;
+      _editController = TextEditingController(text: widget.message.text);
+    });
+  }
+
+  void _cancelEdit() {
+    setState(() {
+      _editing = false;
+      _editController?.dispose();
+      _editController = null;
+    });
+  }
+
+  void _confirmEdit() {
+    final text = _editController?.text.trim() ?? '';
+    if (text.isEmpty) return;
+    widget.onEditUserMessage?.call(widget.message, text);
+    setState(() {
+      _editing = false;
+      _editController?.dispose();
+      _editController = null;
+    });
+  }
+
+  Future<void> _copyToClipboard(String text) async {
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Disalin ke clipboard'), duration: Duration(seconds: 1)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final message = widget.message;
     final isUser = message.isUser;
     final isThinking = !isUser && message.text == _thinkingPlaceholder;
     if (isThinking) {
@@ -141,18 +205,21 @@ class ChatBubble extends StatelessWidget {
             if (message.docSource != null) _docSourceBadge(message.docSource!),
             if (media != null)
               media.isVideo ? _videoUrlPlaceholder(media.url) : _markdownImagePreview(context, media.url),
-            SelectableText(
-              cleanText,
-              style: TextStyle(
-                fontSize: 13.4,
-                color: isUser ? JeonColors.ink : JeonColors.ink,
-                height: 1.4,
+            if (isUser && _editing)
+              _editField()
+            else
+              SelectableText(
+                cleanText,
+                style: TextStyle(
+                  fontSize: 13.4,
+                  color: isUser ? JeonColors.ink : JeonColors.ink,
+                  height: 1.4,
+                ),
+                toolbarOptions: const ToolbarOptions(
+                  copy: true,
+                  selectAll: true,
+                ),
               ),
-              toolbarOptions: const ToolbarOptions(
-                copy: true,
-                selectAll: true,
-              ),
-            ),
             if (message.toolCall != null) ToolCardWidget(toolCall: message.toolCall!),
             if (message.imageUrl != null) _imagePreview(context, message.imageUrl!),
             if (message.audioUrl != null) AudioMessagePlayer(url: message.audioUrl!),
@@ -177,14 +244,13 @@ class ChatBubble extends StatelessWidget {
                     if (message.costChip != null && message.timeChip != null)
                       const SizedBox(width: 6),
                     if (message.timeChip != null) _chip(message.timeChip!),
-                    const Spacer(),
-                    Icon(Icons.copy, size: 14, color: JeonColors.inkFaint),
                   ],
                 ),
               ),
           ],
         ),
           ),
+          if (!_editing) _actionRow(isUser),
           if (message.autoLearnSkill != null) _autoLearnBanner(message.autoLearnSkill!),
         ],
       ),
@@ -200,6 +266,100 @@ class ChatBubble extends StatelessWidget {
               ? [bubble, const SizedBox(width: 10), avatar]
               : [avatar, const SizedBox(width: 10), bubble],
         ),
+      ),
+    );
+  }
+
+  /// Bubble user berubah jadi ini saat _editing — TextField isi pesan asli +
+  /// tombol Batal (X)/Kirim Ulang (✓).
+  Widget _editField() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TextField(
+          controller: _editController,
+          autofocus: true,
+          maxLines: null,
+          style: const TextStyle(fontSize: 13.4, color: JeonColors.ink, height: 1.4),
+          decoration: const InputDecoration(
+            isDense: true,
+            border: InputBorder.none,
+            contentPadding: EdgeInsets.zero,
+          ),
+          onSubmitted: (_) => _confirmEdit(),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            InkWell(
+              borderRadius: BorderRadius.circular(999),
+              onTap: _cancelEdit,
+              child: const Padding(
+                padding: EdgeInsets.all(6),
+                child: Icon(Icons.close_rounded, size: 18, color: JeonColors.inkFaint),
+              ),
+            ),
+            const SizedBox(width: 4),
+            InkWell(
+              borderRadius: BorderRadius.circular(999),
+              onTap: _confirmEdit,
+              child: Container(
+                padding: const EdgeInsets.all(6),
+                decoration: const BoxDecoration(color: JeonColors.accent, shape: BoxShape.circle),
+                child: const Icon(Icons.check_rounded, size: 18, color: Color(0xFF04150A)),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  /// Baris ikon kecil di bawah bubble: pensil-edit (user) atau copy+regenerate
+  /// (AI) — selalu terlihat (bukan hover-only) supaya konsisten di
+  /// touch & desktop, tidak butuh state hover terpisah.
+  Widget _actionRow(bool isUser) {
+    if (isUser) {
+      if (widget.onEditUserMessage == null) return const SizedBox.shrink();
+      return Padding(
+        padding: const EdgeInsets.only(top: 3, right: 2),
+        child: Align(
+          alignment: Alignment.centerRight,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(999),
+            onTap: _startEdit,
+            child: const Padding(
+              padding: EdgeInsets.all(6),
+              child: Icon(Icons.edit_outlined, size: 14, color: JeonColors.inkFaint),
+            ),
+          ),
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 3, left: 2),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          InkWell(
+            borderRadius: BorderRadius.circular(999),
+            onTap: () => _copyToClipboard(widget.message.text),
+            child: const Padding(
+              padding: EdgeInsets.all(6),
+              child: Icon(Icons.copy_outlined, size: 14, color: JeonColors.inkFaint),
+            ),
+          ),
+          if (widget.onRegenerateAiMessage != null)
+            InkWell(
+              borderRadius: BorderRadius.circular(999),
+              onTap: () => widget.onRegenerateAiMessage!(widget.message),
+              child: const Padding(
+                padding: EdgeInsets.all(6),
+                child: Icon(Icons.refresh_rounded, size: 14, color: JeonColors.inkFaint),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -362,13 +522,13 @@ class ChatBubble extends StatelessWidget {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    if (onEditImage != null)
+                    if (widget.onEditImage != null)
                       _viewerToolButton(
                         icon: Icons.brush_outlined,
                         label: 'Edit',
                         onTap: () {
                           Navigator.of(dialogContext).pop();
-                          onEditImage!(url);
+                          widget.onEditImage!(url);
                         },
                       ),
                     const SizedBox(width: 28),
@@ -612,11 +772,11 @@ class ChatBubble extends StatelessWidget {
                   style: const TextStyle(
                       fontSize: 11.5, color: _analysisGreen, fontWeight: FontWeight.w600, height: 1.3)),
             ),
-            if (onViewAutoLearnSkill != null) ...[
+            if (widget.onViewAutoLearnSkill != null) ...[
               const SizedBox(width: 8),
               InkWell(
                 borderRadius: BorderRadius.circular(999),
-                onTap: onViewAutoLearnSkill,
+                onTap: widget.onViewAutoLearnSkill,
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(

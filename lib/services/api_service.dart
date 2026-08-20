@@ -236,6 +236,26 @@ class ApiService {
   /// {items: [{name, url, kind, size, uploaded_at}], total}.
   Future<Map<String, dynamic>> getLibrary() => _get('/library', timeout: const Duration(seconds: 30));
 
+  // ---- Instruksi Kustom (Fitur #4) via /instructions — backend sudah live,
+  // action get/save/clear. {email, about_me, response_style, enabled,
+  // updated_at}. ----
+
+  Future<Map<String, dynamic>> getInstructions() => _post('/instructions', {'action': 'get'});
+
+  Future<Map<String, dynamic>> saveInstructions({
+    required String aboutMe,
+    required String responseStyle,
+    required bool enabled,
+  }) =>
+      _post('/instructions', {
+        'action': 'save',
+        'about_me': aboutMe,
+        'response_style': responseStyle,
+        'enabled': enabled,
+      });
+
+  Future<Map<String, dynamic>> clearInstructions() => _post('/instructions', {'action': 'clear'});
+
   /// Langkah 1 login WhatsApp/HP — minta OTP dikirim ke [phone]. Respons:
   /// {ok, message, dev_hint, expires_in} — dev_hint = OTP sementara selama
   /// belum ada gateway SMS/WA asli.
@@ -530,14 +550,18 @@ class ApiService {
     return (res['content'] ?? 'Error').toString();
   }
 
+  /// [cancelToken] — lihat [CancelToken], dipakai fitur "Stop Generation" di
+  /// chat_screen.dart untuk menggugurkan request ini kalau user tap Stop.
   Future<String> sendChat({
     required List<ChatMessage> history,
     required String model,
     String? sessionId,
+    CancelToken? cancelToken,
   }) async {
     if (!isConfigured) {
       throw ApiException('Base URL belum diatur. Buka Settings untuk isi URL backend.');
     }
+    if (cancelToken?.isCancelled == true) throw RequestCancelledException();
     final body = {
       'messages': [
         {'role': 'system', 'content': _systemPrompt},
@@ -546,10 +570,20 @@ class ApiService {
       'model': model,
       if (sessionId != null && sessionId.isNotEmpty) 'session_id': sessionId,
     };
-    final res = await http
-        .post(_uri('/chat'), headers: _headers, body: jsonEncode(body))
-        .timeout(_chatTimeout, onTimeout: () => throw ApiException(
-            'Timeout: AI tidak merespons dalam 90 detik.'));
+    final client = http.Client();
+    cancelToken?._client = client;
+    http.Response res;
+    try {
+      res = await client
+          .post(_uri('/chat'), headers: _headers, body: jsonEncode(body))
+          .timeout(_chatTimeout, onTimeout: () => throw ApiException(
+              'Timeout: AI tidak merespons dalam 90 detik.'));
+    } on http.ClientException {
+      if (cancelToken?.isCancelled == true) throw RequestCancelledException();
+      rethrow;
+    } finally {
+      client.close();
+    }
     if (res.statusCode != 200) {
       throw ApiException('Chat gagal (${res.statusCode}): ${res.body}');
     }
@@ -573,6 +607,7 @@ class ApiService {
   /// eksplisit dari task, dan URL-nya JUGA disisipkan sebagai teks di
   /// [prompt] (lihat pemanggil di chat_screen.dart) sebagai jaring pengaman
   /// kalau field JSON ini ternyata tidak diparse backend.
+  /// [cancelToken] — lihat [CancelToken], dipakai fitur "Stop Generation".
   Future<AgentResult> sendAgentPrompt({
     required String prompt,
     required String model,
@@ -580,10 +615,16 @@ class ApiService {
     List<String> plugins = const [],
     String? imageUrl,
     String? attachmentUrl,
+    CancelToken? cancelToken,
   }) async {
     if (!isConfigured) {
       throw ApiException('Base URL belum diatur. Buka Settings untuk isi URL backend.');
     }
+    if (cancelToken?.isCancelled == true) throw RequestCancelledException();
+    // Satu client dipakai sepanjang alur (sync + fallback submit+poll) supaya
+    // satu cancelToken.cancel() menggugurkan tahap mana pun yang sedang aktif.
+    final client = http.Client();
+    cancelToken?._client = client;
 
     // Strategi: coba sync dulu (untuk request cepat <90s).
     // Kalau timeout, fallback ke async submit+poll.
@@ -596,14 +637,14 @@ class ApiService {
         if (imageUrl != null && imageUrl.isNotEmpty) 'image_url': imageUrl,
         if (attachmentUrl != null && attachmentUrl.isNotEmpty) 'attachment_url': attachmentUrl,
       };
-      final res = await http
+      final res = await client
           .post(_uri('/agent'), headers: _headers, body: jsonEncode(body))
           .timeout(const Duration(seconds: 95), onTimeout: () => throw AgentTimeoutException());
 
       if (res.statusCode == 504) {
         // Timeout sync → fallback ke async
         return await _agentSubmitPoll(prompt, model, agentSession, plugins,
-            imageUrl: imageUrl, attachmentUrl: attachmentUrl);
+            imageUrl: imageUrl, attachmentUrl: attachmentUrl, client: client, cancelToken: cancelToken);
       }
       if (res.statusCode != 200) {
         throw ApiException('Agent gagal (${res.statusCode}): ${res.body}');
@@ -621,13 +662,21 @@ class ApiService {
     } on AgentTimeoutException {
       // Sync timeout → fallback ke async submit+poll
       return await _agentSubmitPoll(prompt, model, agentSession, plugins,
-          imageUrl: imageUrl, attachmentUrl: attachmentUrl);
+          imageUrl: imageUrl, attachmentUrl: attachmentUrl, client: client, cancelToken: cancelToken);
+    } on http.ClientException {
+      if (cancelToken?.isCancelled == true) throw RequestCancelledException();
+      rethrow;
+    } finally {
+      client.close();
     }
   }
 
   Future<AgentResult> _agentSubmitPoll(
       String prompt, String model, String? agentSession, List<String> plugins,
-      {String? imageUrl, String? attachmentUrl}) async {
+      {String? imageUrl,
+      String? attachmentUrl,
+      required http.Client client,
+      CancelToken? cancelToken}) async {
     // Submit task
     final submitBody = {
       'prompt': prompt,
@@ -637,9 +686,15 @@ class ApiService {
       if (imageUrl != null && imageUrl.isNotEmpty) 'image_url': imageUrl,
       if (attachmentUrl != null && attachmentUrl.isNotEmpty) 'attachment_url': attachmentUrl,
     };
-    final submitRes = await http
-        .post(_uri('/agent/submit'), headers: _headers, body: jsonEncode(submitBody))
-        .timeout(_shortTimeout);
+    http.Response submitRes;
+    try {
+      submitRes = await client
+          .post(_uri('/agent/submit'), headers: _headers, body: jsonEncode(submitBody))
+          .timeout(_shortTimeout);
+    } on http.ClientException {
+      if (cancelToken?.isCancelled == true) throw RequestCancelledException();
+      rethrow;
+    }
 
     if (submitRes.statusCode != 200) {
       throw ApiException('Agent submit gagal (${submitRes.statusCode})');
@@ -650,12 +705,22 @@ class ApiService {
       throw ApiException('Agent submit: task_id tidak ditemukan');
     }
 
-    // Poll setiap 5 detik, max 180 detik (agent berat butuh waktu)
+    // Poll setiap 5 detik, max 180 detik (agent berat butuh waktu) — cek
+    // cancelToken sebelum & sesudah tiap jeda supaya Stop tetap responsif
+    // (maks ~5 detik) walau sedang di antara dua panggilan poll.
     for (int i = 0; i < 36; i++) {
+      if (cancelToken?.isCancelled == true) throw RequestCancelledException();
       await Future.delayed(const Duration(seconds: 5));
-      final pollRes = await http
-          .post(_uri('/agent/poll'), headers: _headers, body: jsonEncode({'task_id': taskId}))
-          .timeout(_shortTimeout);
+      if (cancelToken?.isCancelled == true) throw RequestCancelledException();
+      http.Response pollRes;
+      try {
+        pollRes = await client
+            .post(_uri('/agent/poll'), headers: _headers, body: jsonEncode({'task_id': taskId}))
+            .timeout(_shortTimeout);
+      } on http.ClientException {
+        if (cancelToken?.isCancelled == true) throw RequestCancelledException();
+        rethrow;
+      }
       if (pollRes.statusCode != 200) continue;
       final pollData = jsonDecode(pollRes.body) as Map<String, dynamic>;
       final status = pollData['status']?.toString();
@@ -779,6 +844,32 @@ class AgentResult {
     this.model,
     this.pluginsUsed = const [],
   });
+}
+
+/// Token pembatal untuk sendChat()/sendAgentPrompt() (Fitur "Stop Generation")
+/// — package:http tidak punya cancel-token bawaan seperti Dio, jadi ini
+/// bungkus http.Client() yang bisa di-close() paksa dari luar untuk
+/// menggugurkan request yang sedang berjalan. [cancel] juga men-set flag
+/// [isCancelled] supaya poll loop di _agentSubmitPoll bisa berhenti di
+/// antara jeda (bukan cuma saat ada request HTTP aktif untuk digugurkan).
+class CancelToken {
+  http.Client? _client;
+  bool _cancelled = false;
+
+  bool get isCancelled => _cancelled;
+
+  void cancel() {
+    _cancelled = true;
+    _client?.close();
+  }
+}
+
+/// Dilempar saat request dibatalkan lewat [CancelToken.cancel] — dibedakan
+/// dari error jaringan asli supaya pemanggil tahu ini disengaja user (tidak
+/// perlu fallback ke /chat atau tampilkan pesan error).
+class RequestCancelledException implements Exception {
+  @override
+  String toString() => 'Dibatalkan oleh pengguna';
 }
 
 class AgentTimeoutException implements Exception {

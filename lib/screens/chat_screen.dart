@@ -1,4 +1,6 @@
 import 'package:audioplayers/audioplayers.dart';
+import 'package:cross_file/cross_file.dart';
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 
@@ -37,6 +39,20 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
   final _scrollController = ScrollController();
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   int _guestMessageCount = 0;
+  String _lastModel = ApiService.fallbackModelOptions.first.value;
+
+  // ---- Stop Generation — hanya menutupi jalur /chat & /agent
+  // (_handleChatRequest, _handleCostRequest); handler lain (media gen, web
+  // search, dsb) di luar cakupan permintaan fitur ini. ----
+  bool _isGenerating = false;
+  CancelToken? _activeCancelToken;
+
+  // ---- Drag & drop file ke area chat (web/desktop) — hasil upload didorong
+  // ke input_bar.dart lewat notifier ini (lihat JeonChatInputBar.
+  // externalAttachment), supaya jadi lampiran pending yang SAMA dengan hasil
+  // Upload Gambar/Dokumen manual di menu "+", bukan UI terpisah. ----
+  final ValueNotifier<Map<String, dynamic>?> _externalAttachment = ValueNotifier(null);
+  bool _dragHovering = false;
 
   // ---- Sidebar JeonChat + multi-conversation ----
   String? _conversationId;
@@ -534,7 +550,52 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
   @override
   void dispose() {
     _scrollController.dispose();
+    _externalAttachment.dispose();
     super.dispose();
+  }
+
+  /// Drag & drop (Fitur "Attach file di composer") — file yang di-drop ke
+  /// area chat diupload lewat endpoint yang sama dengan Upload Gambar/
+  /// Dokumen manual (POST /upload/file via ApiService.uploadFile), lalu
+  /// hasilnya didorong ke input_bar.dart lewat _externalAttachment supaya
+  /// jadi lampiran pending — bukan langsung terkirim.
+  Future<void> _handleDroppedFiles(List<XFile> files) async {
+    if (files.isEmpty) return;
+    final file = files.first; // Satu lampiran per pesan, sama seperti menu "+".
+    if (!widget.api.isLoggedIn) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Login dulu untuk upload file.')),
+        );
+      }
+      return;
+    }
+    try {
+      final bytes = await file.readAsBytes();
+      if (bytes.length > 50 * 1024 * 1024) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('File terlalu besar (maks 50MB)')),
+          );
+        }
+        return;
+      }
+      final up = await widget.api.uploadFile(name: file.name, bytes: bytes);
+      final url = (up['url'] ?? '').toString();
+      if (url.isEmpty) {
+        throw Exception('Server tidak mengembalikan URL file');
+      }
+      _externalAttachment.value = {
+        'name': (up['name'] ?? file.name).toString(),
+        'url': url,
+        'size': bytes.length,
+      };
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Gagal upload file: $e')),
+      );
+    }
   }
 
   /// Auth gate ala ChatGPT: Plugins/Library/Scheduled/More butuh login —
@@ -618,6 +679,10 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
           ..._messages.sublist(idx + 1),
         ];
       }
+      // Aman dipanggil dari handler mana pun (cuma _handleChatRequest &
+      // _handleCostRequest yang pernah men-set true) — idempoten kalau sudah false.
+      _isGenerating = false;
+      _activeCancelToken = null;
     });
     _maybeSpeak(reply);
     if (reply.autoLearnSkill != null) _loadUserSkillCount();
@@ -636,6 +701,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     // Boleh kirim lampiran tanpa teks (ala WhatsApp/Telegram) — tapi tidak
     // boleh keduanya kosong.
     if (trimmed.isEmpty && !hasAttachment) return;
+    _lastModel = model;
     _maybeOfferSaveSkill(trimmed);
     final typing = ChatMessage(isUser: false, text: _thinkingText);
     final isImageAttachment = attachmentKind == 'image';
@@ -715,10 +781,72 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     await _handleChatRequest(trimmed, model, typing);
   }
 
-  Future<void> _handleCostRequest(String model, ChatMessage typing) async {
+  /// Tombol Stop di composer (menggantikan Send saat _isGenerating) —
+  /// menggugurkan request /chat atau /agent yang sedang berjalan lewat
+  /// CancelToken (lihat ApiService). UI-nya beres sendiri lewat
+  /// RequestCancelledException yang ditangkap di _handleChatRequest/
+  /// _handleCostRequest → _resolveTyping('Dihentikan.') → _isGenerating
+  /// balik false otomatis.
+  void _stopGeneration() {
+    _activeCancelToken?.cancel();
+  }
+
+  /// Edit pesan USER (Fitur "Edit pesan") — pesan itu & SEMUA pesan
+  /// setelahnya (lokal + server lewat _saveHistory → ChatHistoryService)
+  /// dihapus, lalu teks yang sudah diedit dikirim ulang sebagai pesan baru
+  /// via _send() biasa (jalur deteksi media/search/dsb tetap berlaku sama
+  /// seperti pesan baru pada umumnya).
+  Future<void> _editUserMessage(ChatMessage message, String newText) async {
+    final idx = _messages.indexWhere((m) => identical(m, message));
+    if (idx == -1) return;
+    setState(() => _messages = _messages.sublist(0, idx));
+    await _saveHistory();
+    await _send(newText, _lastModel);
+  }
+
+  /// Regenerate jawaban AI (Fitur "Regenerate") — bubble itu dihapus dari
+  /// history, lalu kirim ulang PERSIS pertanyaan user sebelumnya lewat
+  /// /chat (bukan /agent — /agent pakai agentSession sisi server yang tidak
+  /// bisa dikontrol presisi "messages array sama persis sampai sebelum
+  /// jawaban itu" sesuai permintaan fitur ini).
+  Future<void> _regenerateMessage(ChatMessage aiMessage) async {
+    if (_isGenerating) return;
+    final idx = _messages.indexWhere((m) => identical(m, aiMessage));
+    if (idx <= 0) return;
+    final typing = ChatMessage(isUser: false, text: _thinkingText);
+    setState(() => _messages = [..._messages.sublist(0, idx), typing]);
+    await _saveHistory();
+    _scrollToBottom();
+    final cancelToken = CancelToken();
+    setState(() {
+      _isGenerating = true;
+      _activeCancelToken = cancelToken;
+    });
     try {
-      final reply = await widget.api.sendChat(history: _cleanHistory(), model: model);
+      final reply =
+          await widget.api.sendChat(history: _cleanHistory(), model: _lastModel, cancelToken: cancelToken);
+      final parsed = _extractAutoLearn(reply);
+      _resolveTyping(typing, ChatMessage(isUser: false, text: parsed.text, autoLearnSkill: parsed.autoLearnSkill));
+    } on RequestCancelledException {
+      _resolveTyping(typing, const ChatMessage(isUser: false, text: 'Dihentikan.'));
+    } catch (e) {
+      _resolveTyping(typing, ChatMessage(isUser: false, text: '⚠️ Gagal regenerate: $e'));
+    }
+    await _saveHistory();
+    _scrollToBottom();
+  }
+
+  Future<void> _handleCostRequest(String model, ChatMessage typing) async {
+    final cancelToken = CancelToken();
+    setState(() {
+      _isGenerating = true;
+      _activeCancelToken = cancelToken;
+    });
+    try {
+      final reply = await widget.api.sendChat(history: _cleanHistory(), model: model, cancelToken: cancelToken);
       _resolveTyping(typing, ChatMessage(isUser: false, text: reply));
+    } on RequestCancelledException {
+      _resolveTyping(typing, const ChatMessage(isUser: false, text: 'Dihentikan.'));
     } catch (e) {
       _resolveTyping(typing, ChatMessage(isUser: false, text: '⚠️ Gagal cek biaya: $e'));
     }
@@ -802,6 +930,11 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
 
   Future<void> _handleChatRequest(String text, String model, ChatMessage typing,
       {String? imageUrl, String? attachmentUrl}) async {
+    final cancelToken = CancelToken();
+    setState(() {
+      _isGenerating = true;
+      _activeCancelToken = cancelToken;
+    });
     try {
       final result = await widget.api.sendAgentPrompt(
         prompt: text,
@@ -810,6 +943,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
         plugins: _installedPlugins.map((p) => p.id).toList(),
         imageUrl: imageUrl,
         attachmentUrl: attachmentUrl,
+        cancelToken: cancelToken,
       );
       if (result.agentSession != null) {
         _agentSession = result.agentSession;
@@ -817,14 +951,23 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       _resolveTyping(typing, _buildAgentMessage(result.content, pluginsUsed: result.pluginsUsed));
       _saveHistory();
       _loadQuota();
+    } on RequestCancelledException {
+      // Dihentikan lewat tombol Stop — jangan fallback ke /chat, backend
+      // ini tidak streaming jadi tidak ada partial response yang bisa
+      // ditampilkan (lihat catatan di laporan).
+      _resolveTyping(typing, const ChatMessage(isUser: false, text: 'Dihentikan.'));
+      _saveHistory();
     } on AgentTimeoutException {
       // Agent timeout — auto-fallback ke /chat
       try {
-        final reply = await widget.api.sendChat(history: _cleanHistory(), model: model);
+        final reply = await widget.api.sendChat(history: _cleanHistory(), model: model, cancelToken: cancelToken);
         final parsed = _extractAutoLearn(reply);
         _resolveTyping(typing, ChatMessage(isUser: false, text: parsed.text, autoLearnSkill: parsed.autoLearnSkill));
         _saveHistory();
         _loadQuota();
+      } on RequestCancelledException {
+        _resolveTyping(typing, const ChatMessage(isUser: false, text: 'Dihentikan.'));
+        _saveHistory();
       } catch (e2) {
         _resolveTyping(typing, ChatMessage(isUser: false, text: 'Maaf, koneksi lambat. Coba ulangi ya Appa 🙏'));
         _saveHistory();
@@ -832,11 +975,14 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     } catch (e) {
       // Fallback ke /chat kalau /agent gagal
       try {
-        final reply = await widget.api.sendChat(history: _cleanHistory(), model: model);
+        final reply = await widget.api.sendChat(history: _cleanHistory(), model: model, cancelToken: cancelToken);
         final parsed = _extractAutoLearn(reply);
         _resolveTyping(typing, ChatMessage(isUser: false, text: parsed.text, autoLearnSkill: parsed.autoLearnSkill));
         _saveHistory();
         _loadQuota();
+      } on RequestCancelledException {
+        _resolveTyping(typing, const ChatMessage(isUser: false, text: 'Dihentikan.'));
+        _saveHistory();
       } catch (e2) {
         _resolveTyping(typing, ChatMessage(isUser: false, text: '⚠️ ${e2.toString()}'));
         _saveHistory();
@@ -1246,28 +1392,69 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       body: Column(
         children: [
           Expanded(
-            child: AnimatedOpacity(
-              opacity: _messagesOpacity,
-              duration: const Duration(milliseconds: 150),
-              curve: Curves.easeOut,
-              child: _messages.isEmpty
-                  ? _welcomeScreen()
-                  : ListView.builder(
-                      controller: _scrollController,
-                      padding: const EdgeInsets.fromLTRB(14, 16, 14, 8),
-                      itemCount: _messages.length,
-                      scrollCacheExtent: const ScrollCacheExtent.pixels(500),
-                      itemBuilder: (context, i) =>
-                          ChatBubble(
-                            message: _messages[i],
-                            onViewAutoLearnSkill: _openUserSkills,
-                            onEditImage: _openImageEditor,
+            child: DropTarget(
+              onDragDone: (detail) => _handleDroppedFiles(detail.files),
+              onDragEntered: (_) => setState(() => _dragHovering = true),
+              onDragExited: (_) => setState(() => _dragHovering = false),
+              child: Stack(
+                children: [
+                  AnimatedOpacity(
+                    opacity: _messagesOpacity,
+                    duration: const Duration(milliseconds: 150),
+                    curve: Curves.easeOut,
+                    child: _messages.isEmpty
+                        ? _welcomeScreen()
+                        : ListView.builder(
+                            controller: _scrollController,
+                            padding: const EdgeInsets.fromLTRB(14, 16, 14, 8),
+                            itemCount: _messages.length,
+                            scrollCacheExtent: const ScrollCacheExtent.pixels(500),
+                            itemBuilder: (context, i) =>
+                                ChatBubble(
+                                  message: _messages[i],
+                                  onViewAutoLearnSkill: _openUserSkills,
+                                  onEditImage: _openImageEditor,
+                                  onEditUserMessage: _editUserMessage,
+                                  onRegenerateAiMessage: _regenerateMessage,
+                                ),
                           ),
+                  ),
+                  if (_dragHovering)
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: Container(
+                          color: JeonColors.accent.withValues(alpha: 0.08),
+                          alignment: Alignment.center,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                            decoration: BoxDecoration(
+                              color: JeonColors.surface2,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: JeonColors.accent, width: 1.5),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.file_upload_outlined, color: JeonColors.accent, size: 20),
+                                SizedBox(width: 10),
+                                Text('Lepas file di sini untuk upload',
+                                    style: TextStyle(
+                                        color: JeonColors.ink, fontSize: 13.5, fontWeight: FontWeight.w600)),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
                     ),
+                ],
+              ),
             ),
           ),
           JeonChatInputBar(
             onSend: _send,
+            isGenerating: _isGenerating,
+            onStop: _stopGeneration,
+            externalAttachment: _externalAttachment,
             onGenerateImage: (p) => _requireAccount(() => _generateImageDirect(p)),
             onSearchWeb: _searchWeb,
             onDeepResearch: (t) => _requireAuth(() => _deepResearch(t)),

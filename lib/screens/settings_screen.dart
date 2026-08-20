@@ -4,6 +4,7 @@ import '../services/api_service.dart';
 import '../services/profile_service.dart';
 import '../services/settings_service.dart';
 import '../theme.dart';
+import 'custom_instructions_screen.dart';
 import 'login_screen.dart';
 import 'onboarding_profile_screen.dart';
 import 'skill_list_screen.dart';
@@ -13,6 +14,7 @@ enum SettingsCategory {
   general,
   notifications,
   personalization,
+  customInstructions,
   memory,
   userSkills,
   plugins,
@@ -39,6 +41,8 @@ extension SettingsCategoryX on SettingsCategory {
         return Icons.notifications_outlined;
       case SettingsCategory.personalization:
         return Icons.auto_awesome_outlined;
+      case SettingsCategory.customInstructions:
+        return Icons.tune;
       case SettingsCategory.memory:
         return Icons.psychology_outlined;
       case SettingsCategory.userSkills:
@@ -80,6 +84,8 @@ extension SettingsCategoryX on SettingsCategory {
         return 'Notifications';
       case SettingsCategory.personalization:
         return 'Personalization';
+      case SettingsCategory.customInstructions:
+        return 'Instruksi Kustom';
       case SettingsCategory.memory:
         return 'Memory';
       case SettingsCategory.userSkills:
@@ -180,6 +186,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           final cat = SettingsCategory.values[i];
           final isUserSkills = cat == SettingsCategory.userSkills;
           final isVoice = cat == SettingsCategory.voice;
+          final isCustomInstructions = cat == SettingsCategory.customInstructions;
           return ListTile(
             leading: isUserSkills
                 ? const Text('🧠', style: TextStyle(fontSize: 18))
@@ -191,15 +198,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: isUserSkills
                 ? const Text('Kemampuan yang AI pelajari dari kamu',
                     style: TextStyle(fontSize: 10.5, color: JeonColors.inkFaint))
-                : (isVoice && _selectedVoiceName != null)
-                    ? Text('Suara: $_selectedVoiceName',
-                        style: const TextStyle(fontSize: 10.5, color: JeonColors.inkFaint))
-                    : null,
+                : isCustomInstructions
+                    ? const Text('Personalisasi cara JEON Chat merespons kamu',
+                        style: TextStyle(fontSize: 10.5, color: JeonColors.inkFaint))
+                    : (isVoice && _selectedVoiceName != null)
+                        ? Text('Suara: $_selectedVoiceName',
+                            style: const TextStyle(fontSize: 10.5, color: JeonColors.inkFaint))
+                        : null,
             trailing: const Icon(Icons.chevron_right, size: 18, color: JeonColors.inkFaint),
             onTap: () {
               if (isUserSkills) {
                 Navigator.of(context).push(MaterialPageRoute(
                   builder: (_) => SkillListScreen(api: widget.api, onChanged: widget.onUserSkillsChanged),
+                ));
+                return;
+              }
+              if (isCustomInstructions) {
+                Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => CustomInstructionsScreen(api: widget.api),
                 ));
                 return;
               }
