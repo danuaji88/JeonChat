@@ -21,7 +21,12 @@ import '../theme.dart';
 /// skills) semuanya di menu "+" — tidak lagi jadi ikon terpisah di toolbar,
 /// biar bar tetap satu baris & minimal.
 class JeonChatInputBar extends StatefulWidget {
-  final void Function(String text, String model) onSend;
+  /// [attachmentUrl]/[attachmentName]/[attachmentKind] terisi kalau user
+  /// pasang lampiran lewat menu "+" (Upload Gambar/Upload File/Tambah dari
+  /// Library) sebelum kirim — mirip preview attachment ala WhatsApp/Telegram
+  /// (lihat _pendingAttachment & _attachmentPreview di bawah).
+  final void Function(String text, String model,
+      {String? attachmentUrl, String? attachmentName, String? attachmentKind}) onSend;
   final ValueChanged<String> onGenerateImage;
   final ValueChanged<String> onSearchWeb;
   final ValueChanged<String> onDeepResearch;
@@ -53,6 +58,15 @@ class JeonChatInputBar extends StatefulWidget {
 
   /// "Upload Dokumen" di menu "+" — teks file sudah dibaca (UTF-8) di sini.
   final void Function(String name, String text) onUploadDoc;
+
+  /// "Upload Gambar" & "Upload File/Dokumen" di menu "+" — nama+bytes file
+  /// dibaca di sini, parent yang upload lewat ApiService.uploadFile() dan
+  /// balikin respons server mentah ({name, url, size, status}).
+  final Future<Map<String, dynamic>> Function(String name, List<int> bytes) onUploadAttachment;
+
+  /// "Tambah dari Library" di menu "+" — parent yang panggil GET /library,
+  /// balikin daftar item mentah ({name, url, kind, size, uploaded_at}).
+  final Future<List<Map<String, dynamic>>> Function() onFetchLibrary;
 
   /// "Code Interpreter" di menu "+" — parent yang push route-nya, biar bisa
   /// lewat auth gate dulu kayak Library/Plugins.
@@ -87,6 +101,8 @@ class JeonChatInputBar extends StatefulWidget {
     required this.onAnalyzeImage,
     required this.onWebSearch,
     required this.onUploadDoc,
+    required this.onUploadAttachment,
+    required this.onFetchLibrary,
     required this.onSpeechToText,
     this.activePluginCount = 0,
     this.onOpenPlugins,
@@ -102,12 +118,19 @@ class JeonChatInputBar extends StatefulWidget {
 
 class _JeonChatInputBarState extends State<JeonChatInputBar> {
   static const _selectedModelPrefsKey = 'selected_model';
+  static const _maxUploadBytes = 50 * 1024 * 1024;
 
   final _controller = TextEditingController();
   final _textFocusNode = FocusNode();
   bool _hasText = false;
   ModelOption? _selectedModel;
   String? _pendingSelectedValue;
+
+  // ---- Lampiran (Upload Gambar/Upload File/Tambah dari Library) — pending
+  // sampai user kirim pesan berikutnya, mirip preview attachment ala
+  // WhatsApp/Telegram. ----
+  _PendingAttachment? _pendingAttachment;
+  bool _attachmentBusy = false;
 
   ModelOption get _selected =>
       _selectedModel ??
@@ -196,9 +219,19 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
 
   void _submit([String? preset]) {
     final text = (preset ?? _controller.text).trim();
-    if (text.isEmpty) return;
-    widget.onSend(text, _selected.value);
+    final attachment = _pendingAttachment;
+    // Boleh kirim lampiran tanpa teks (ala WhatsApp/Telegram), tapi tidak
+    // boleh keduanya kosong.
+    if (text.isEmpty && attachment == null) return;
+    widget.onSend(
+      text,
+      _selected.value,
+      attachmentUrl: attachment?.url,
+      attachmentName: attachment?.name,
+      attachmentKind: attachment?.kind,
+    );
     _controller.clear();
+    if (attachment != null) setState(() => _pendingAttachment = null);
   }
 
   /// Tap = mulai rekam, tap lagi = berhenti & transkrip via speechToText().
@@ -362,6 +395,248 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
     }
   }
 
+  /// "Upload Gambar" — beda dari "Analisis Gambar" (langsung dianalisis AI
+  /// sekali pakai): ini persis ala WhatsApp/Telegram — gambar jadi lampiran
+  /// (preview di atas input bar dulu) dan baru terkirim bareng pesan
+  /// berikutnya, bukan langsung dikirim/dianalisis saat dipilih.
+  Future<void> _pickImageAttachment() async {
+    if (_attachmentBusy) return;
+    try {
+      final result = await FilePicker.platform.pickFiles(type: FileType.image, withData: true);
+      if (result == null || result.files.isEmpty) return;
+      await _uploadAndAttach(result.files.first);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Gagal memilih gambar: $e')),
+      );
+    }
+  }
+
+  /// "Upload File/Dokumen" — filter ke jenis dokumen umum (biar tidak
+  /// tumpang tindih dengan "Upload Gambar" di atas), lampiran nyata
+  /// (bukan teks RAG seperti "Upload Dokumen" lama).
+  Future<void> _pickDocumentAttachment() async {
+    if (_attachmentBusy) return;
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const [
+          'pdf', 'doc', 'docx', 'txt', 'csv', 'xlsx', 'xls', 'ppt', 'pptx', 'rtf', 'md', 'json',
+        ],
+        withData: true,
+      );
+      if (result == null || result.files.isEmpty) return;
+      await _uploadAndAttach(result.files.first);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Gagal memilih dokumen: $e')),
+      );
+    }
+  }
+
+  /// Upload file yang sudah dipilih ke server (POST /upload/file lewat
+  /// parent) lalu jadikan lampiran pending — dipakai baik oleh Upload
+  /// Gambar maupun Upload File/Dokumen.
+  Future<void> _uploadAndAttach(PlatformFile file) async {
+    final bytes = file.bytes;
+    if (bytes == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Tidak bisa membaca isi file ini')),
+      );
+      return;
+    }
+    if (bytes.length > _maxUploadBytes) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('File terlalu besar (maks 50MB)')),
+      );
+      return;
+    }
+    setState(() => _attachmentBusy = true);
+    try {
+      final up = await widget.onUploadAttachment(file.name, bytes);
+      final url = (up['url'] ?? '').toString();
+      if (url.isEmpty) {
+        throw Exception('Server tidak mengembalikan URL file');
+      }
+      if (!mounted) return;
+      setState(() {
+        _pendingAttachment = _PendingAttachment(
+          name: (up['name'] ?? file.name).toString(),
+          url: url,
+          kind: _inferAttachmentKind(file.name),
+          sizeLabel: _formatAttachmentSize(bytes.length),
+        );
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Upload gagal: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _attachmentBusy = false);
+    }
+  }
+
+  /// "Tambah dari Library" — ambil daftar file yang pernah diupload
+  /// (GET /library lewat parent), tampilkan sebagai bottom sheet, item yang
+  /// dipilih jadi lampiran pending sama seperti file yang baru diupload.
+  Future<void> _openLibraryPicker() async {
+    if (_attachmentBusy) return;
+    setState(() => _attachmentBusy = true);
+    List<Map<String, dynamic>> items;
+    try {
+      items = await widget.onFetchLibrary();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Gagal ambil Library: $e')),
+        );
+      }
+      return;
+    } finally {
+      if (mounted) setState(() => _attachmentBusy = false);
+    }
+    if (!mounted) return;
+    final selected = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: JeonColors.surface,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+      builder: (sheetContext) => _libraryPickerSheet(items),
+    );
+    if (selected == null || !mounted) return;
+    final url = (selected['url'] ?? '').toString();
+    if (url.isEmpty) return;
+    final name = (selected['name'] ?? 'File').toString();
+    final kind = (selected['kind'] ?? '').toString();
+    final sizeRaw = selected['size'];
+    setState(() {
+      _pendingAttachment = _PendingAttachment(
+        name: name,
+        url: url,
+        kind: kind.isNotEmpty ? kind : _inferAttachmentKind(name),
+        sizeLabel: sizeRaw is num ? _formatAttachmentSize(sizeRaw.toInt()) : null,
+      );
+    });
+  }
+
+  Widget _libraryPickerSheet(List<Map<String, dynamic>> items) {
+    return SafeArea(
+      child: Container(
+        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.7),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 10),
+            Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(color: JeonColors.surface3, borderRadius: BorderRadius.circular(2)),
+            ),
+            const SizedBox(height: 12),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text('Tambah dari Library',
+                    style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600, color: JeonColors.ink)),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Flexible(
+              child: items.isEmpty
+                  ? const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 30),
+                      child: Text('Belum ada file yang pernah diupload',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(fontSize: 13, color: JeonColors.inkFaint)),
+                    )
+                  : ListView.builder(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.only(bottom: 12),
+                      itemCount: items.length,
+                      itemBuilder: (context, i) => _libraryTile(items[i]),
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _libraryTile(Map<String, dynamic> item) {
+    final name = (item['name'] ?? 'File').toString();
+    final url = (item['url'] ?? '').toString();
+    final kind = (item['kind'] ?? '').toString();
+    final sizeRaw = item['size'];
+    final sizeLabel = sizeRaw is num ? _formatAttachmentSize(sizeRaw.toInt()) : '';
+    final uploadedAt = (item['uploaded_at'] ?? '').toString();
+    return ListTile(
+      onTap: () => Navigator.of(context).pop(item),
+      leading: kind == 'image' && url.isNotEmpty
+          ? ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.network(
+                url,
+                width: 40,
+                height: 40,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => _kindIcon(kind),
+              ),
+            )
+          : _kindIcon(kind),
+      title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 13.4, color: JeonColors.ink)),
+      subtitle: Text([sizeLabel, uploadedAt].where((s) => s.isNotEmpty).join(' · '),
+          style: const TextStyle(fontSize: 11, color: JeonColors.inkFaint)),
+    );
+  }
+
+  Widget _kindIcon(String kind) {
+    IconData icon;
+    switch (kind) {
+      case 'image':
+        icon = Icons.image_outlined;
+        break;
+      case 'audio':
+        icon = Icons.audiotrack_outlined;
+        break;
+      case 'video':
+        icon = Icons.movie_creation_outlined;
+        break;
+      default:
+        icon = Icons.insert_drive_file_outlined;
+    }
+    return Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(color: JeonColors.surface3, borderRadius: BorderRadius.circular(8)),
+      alignment: Alignment.center,
+      child: Icon(icon, size: 18, color: JeonColors.inkMuted),
+    );
+  }
+
+  String _inferAttachmentKind(String name) {
+    final ext = name.contains('.') ? name.substring(name.lastIndexOf('.') + 1).toLowerCase() : '';
+    const imageExt = {'jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'heic'};
+    const audioExt = {'mp3', 'wav', 'm4a', 'ogg', 'flac', 'aac'};
+    const videoExt = {'mp4', 'mov', 'webm', 'mkv', 'avi'};
+    if (imageExt.contains(ext)) return 'image';
+    if (audioExt.contains(ext)) return 'audio';
+    if (videoExt.contains(ext)) return 'video';
+    return 'document';
+  }
+
+  String _formatAttachmentSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
   /// "Cari di Web" di menu "+" — dialog input query lalu diteruskan ke
   /// parent (webSearch(), hasil terstruktur).
   Future<void> _showWebSearchDialog() async {
@@ -458,6 +733,18 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
             _plusMenuTile(Icons.image_search_rounded, 'Analisis Gambar', onTap: () {
               Navigator.of(sheetContext).pop();
               _pickAndAnalyzeImage();
+            }),
+            _plusMenuTile(Icons.add_photo_alternate_outlined, 'Upload Gambar', onTap: () {
+              Navigator.of(sheetContext).pop();
+              _pickImageAttachment();
+            }),
+            _plusMenuTile(Icons.attach_file_rounded, 'Upload File/Dokumen', onTap: () {
+              Navigator.of(sheetContext).pop();
+              _pickDocumentAttachment();
+            }),
+            _plusMenuTile(Icons.folder_open_outlined, 'Tambah dari Library', onTap: () {
+              Navigator.of(sheetContext).pop();
+              _openLibraryPicker();
             }),
             _plusMenuTile(Icons.image_outlined, 'Buat Gambar', onTap: () {
               Navigator.of(sheetContext).pop();
@@ -597,6 +884,27 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
                 ],
               ),
             ),
+          if (_attachmentBusy)
+            const Padding(
+              padding: EdgeInsets.only(left: 4, bottom: 8),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: JeonColors.accent)),
+                  SizedBox(width: 8),
+                  Text('Mengupload...',
+                      style: TextStyle(fontSize: 12, color: JeonColors.accent, fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+          if (_pendingAttachment != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Align(alignment: Alignment.centerLeft, child: _attachmentPreview()),
+            ),
           Container(
             padding: const EdgeInsets.fromLTRB(4, 4, 6, 4),
             decoration: BoxDecoration(
@@ -664,7 +972,7 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
                   onPressed: _sttLoading ? null : _toggleMic,
                 ),
                 const SizedBox(width: 2),
-                if (_hasText)
+                if (_hasText || _pendingAttachment != null)
                   Container(
                     decoration: const BoxDecoration(color: JeonColors.accent, shape: BoxShape.circle),
                     child: IconButton(
@@ -703,6 +1011,63 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
               style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF2ECC71))),
         ),
       );
+
+  /// Chip preview lampiran pending di atas input bar — ala WhatsApp/Telegram
+  /// (thumbnail utk gambar, ikon jenis utk file lain), bisa dibatalkan (✕)
+  /// sebelum dikirim.
+  Widget _attachmentPreview() {
+    final att = _pendingAttachment!;
+    return Container(
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        color: JeonColors.surface2,
+        border: Border.all(color: JeonColors.border),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          att.kind == 'image'
+              ? ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.network(
+                    att.url,
+                    width: 40,
+                    height: 40,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => _kindIcon(att.kind),
+                  ),
+                )
+              : _kindIcon(att.kind),
+          const SizedBox(width: 8),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 160),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(att.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: JeonColors.ink)),
+                if (att.sizeLabel != null)
+                  Text(att.sizeLabel!, style: const TextStyle(fontSize: 10, color: JeonColors.inkFaint)),
+              ],
+            ),
+          ),
+          const SizedBox(width: 4),
+          InkWell(
+            borderRadius: BorderRadius.circular(999),
+            onTap: () => setState(() => _pendingAttachment = null),
+            child: const Padding(
+              padding: EdgeInsets.all(4),
+              child: Icon(Icons.close_rounded, size: 16, color: JeonColors.inkMuted),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   /// Dropdown model tanpa kotak — cuma teks "label ▾" (+ emoji kecil kalau
   /// ada), biar bar input tetap terasa satu baris yang bersih.
@@ -814,4 +1179,21 @@ class _RecordingWaveformState extends State<_RecordingWaveform> with TickerProvi
       }),
     );
   }
+}
+
+/// Lampiran pending (belum terkirim) di input bar — hasil dari Upload
+/// Gambar/Upload File/Dokumen (baru diupload ke server) atau Tambah dari
+/// Library (dipilih dari file lama). [kind] = image|document|audio|video.
+class _PendingAttachment {
+  final String name;
+  final String url;
+  final String kind;
+  final String? sizeLabel;
+
+  const _PendingAttachment({
+    required this.name,
+    required this.url,
+    required this.kind,
+    this.sizeLabel,
+  });
 }

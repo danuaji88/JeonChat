@@ -42,6 +42,14 @@ class ChatMessage {
   final String? videoUrl;
   final String? filePath;
 
+  /// Lampiran non-gambar yang DIUPLOAD USER sendiri lewat menu "+" (Upload
+  /// File/Dokumen atau Tambah dari Library) — beda dari [filePath] yang
+  /// khusus file hasil BUATAN agent di server (lihat chat_bubble.dart
+  /// _fileCard vs _attachmentCard, wordingnya beda). Lampiran gambar dari
+  /// user tetap pakai [imageUrl] (sudah generik, tidak perlu field baru).
+  final String? attachmentUrl;
+  final String? attachmentName;
+
   /// True untuk balasan AI dari analyzeImage() — dipakai chat_bubble.dart
   /// buat kasih warna bubble hijau, beda dari balasan biasa.
   final bool isAnalysis;
@@ -79,6 +87,8 @@ class ChatMessage {
     this.audioUrl,
     this.videoUrl,
     this.filePath,
+    this.attachmentUrl,
+    this.attachmentName,
     this.isAnalysis = false,
     this.searchResults,
     this.codeResult,
@@ -104,6 +114,8 @@ class ChatMessage {
         if (audioUrl != null) 'audioUrl': audioUrl,
         if (videoUrl != null) 'videoUrl': videoUrl,
         if (filePath != null) 'filePath': filePath,
+        if (attachmentUrl != null) 'attachmentUrl': attachmentUrl,
+        if (attachmentName != null) 'attachmentName': attachmentName,
         if (isAnalysis) 'isAnalysis': isAnalysis,
         if (searchResults != null) 'searchResults': searchResults,
         if (codeResult != null) 'codeResult': codeResult,
@@ -124,6 +136,8 @@ class ChatMessage {
         audioUrl: json['audioUrl'] as String?,
         videoUrl: json['videoUrl'] as String?,
         filePath: json['filePath'] as String?,
+        attachmentUrl: json['attachmentUrl'] as String?,
+        attachmentName: json['attachmentName'] as String?,
         isAnalysis: json['isAnalysis'] as bool? ?? false,
         searchResults: (json['searchResults'] as List?)
             ?.whereType<Map>()

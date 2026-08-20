@@ -158,6 +158,8 @@ class ChatBubble extends StatelessWidget {
             if (message.audioUrl != null) AudioMessagePlayer(url: message.audioUrl!),
             if (message.videoUrl != null) _videoCard(message.videoUrl!),
             if (message.filePath != null) _fileCard(message.filePath!),
+            if (message.attachmentUrl != null)
+              _attachmentCard(message.attachmentUrl!, message.attachmentName ?? 'File'),
             if (message.searchResults != null && message.searchResults!.isNotEmpty)
               _searchResultsList(message.searchResults!),
             if (message.codeResult != null) _codeResultCard(message.codeResult!),
@@ -455,6 +457,56 @@ class ChatBubble extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// Lampiran yang DIUPLOAD USER sendiri (menu "+" → Upload File/Dokumen
+  /// atau Tambah dari Library) — beda dari [_fileCard] yang khusus file
+  /// buatan agent, jadi wordingnya "lampiran dari kamu", bukan "dibuat agent".
+  /// Bisa diketuk buat buka filenya di tab baru.
+  Widget _attachmentCard(String url, String name) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(JeonRadius.small),
+      onTap: () => launchUrlString(url, mode: LaunchMode.externalApplication),
+      child: Container(
+        margin: const EdgeInsets.only(top: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+        decoration: BoxDecoration(
+          color: JeonColors.surface3,
+          border: Border.all(color: JeonColors.borderSoft),
+          borderRadius: BorderRadius.circular(JeonRadius.small),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration:
+                  BoxDecoration(color: JeonColors.accentGlow, borderRadius: BorderRadius.circular(8)),
+              alignment: Alignment.center,
+              child: const Icon(Icons.attach_file_rounded, size: 16, color: JeonColors.accent),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style:
+                          const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: JeonColors.ink)),
+                  const Text('Lampiran · ketuk untuk buka',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 10.5, color: JeonColors.inkFaint)),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

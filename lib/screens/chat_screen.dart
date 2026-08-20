@@ -629,13 +629,25 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
   List<ChatMessage> _cleanHistory() =>
       _messages.where((m) => m.text != _thinkingText && !m.text.startsWith('⚠️')).toList();
 
-  Future<void> _send(String text, String model) async {
+  Future<void> _send(String text, String model,
+      {String? attachmentUrl, String? attachmentName, String? attachmentKind}) async {
     final trimmed = text.trim();
-    if (trimmed.isEmpty) return;
+    final hasAttachment = attachmentUrl != null && attachmentUrl.isNotEmpty;
+    // Boleh kirim lampiran tanpa teks (ala WhatsApp/Telegram) — tapi tidak
+    // boleh keduanya kosong.
+    if (trimmed.isEmpty && !hasAttachment) return;
     _maybeOfferSaveSkill(trimmed);
     final typing = ChatMessage(isUser: false, text: _thinkingText);
+    final isImageAttachment = attachmentKind == 'image';
+    final userMessage = ChatMessage(
+      isUser: true,
+      text: trimmed.isEmpty ? (attachmentName ?? 'Lampiran') : trimmed,
+      imageUrl: hasAttachment && isImageAttachment ? attachmentUrl : null,
+      attachmentUrl: hasAttachment && !isImageAttachment ? attachmentUrl : null,
+      attachmentName: hasAttachment && !isImageAttachment ? attachmentName : null,
+    );
     setState(() {
-      _messages = [..._messages, ChatMessage(isUser: true, text: trimmed), typing];
+      _messages = [..._messages, userMessage, typing];
       _guestMessageCount++;
     });
     _saveHistory();
@@ -643,6 +655,21 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
 
     if (widget.api.isGuest && _guestMessageCount == 6 && mounted) {
       showUpgradeDialog(context, api: widget.api, profile: widget.profile);
+    }
+
+    if (hasAttachment) {
+      // Lampiran ada → langsung ke jalur agent/chat normal, skip deteksi
+      // niat generate gambar/video/dsb di bawah (caption lampiran bukan
+      // perintah itu). URL disisipkan juga sebagai teks di prompt (bukan
+      // cuma field JSON image_url/attachment_url) — jaring pengaman kalau
+      // backend /agent belum parse field itu (kontraknya belum
+      // dikonfirmasi, beda dari /upload/file & /library yang sudah pasti).
+      final note = '[Lampiran: ${attachmentName ?? 'file'} - $attachmentUrl]';
+      final prompt = trimmed.isEmpty ? 'Tolong lihat lampiran ini.\n$note' : '$trimmed\n\n$note';
+      await _handleChatRequest(prompt, model, typing,
+          imageUrl: isImageAttachment ? attachmentUrl : null,
+          attachmentUrl: isImageAttachment ? null : attachmentUrl);
+      return;
     }
 
     // ── Deteksi media request → langsung pakai /media/* endpoint (cepat, gratis dulu) ──
@@ -773,13 +800,16 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     }
   }
 
-  Future<void> _handleChatRequest(String text, String model, ChatMessage typing) async {
+  Future<void> _handleChatRequest(String text, String model, ChatMessage typing,
+      {String? imageUrl, String? attachmentUrl}) async {
     try {
       final result = await widget.api.sendAgentPrompt(
         prompt: text,
         model: model,
         agentSession: _agentSession,
         plugins: _installedPlugins.map((p) => p.id).toList(),
+        imageUrl: imageUrl,
+        attachmentUrl: attachmentUrl,
       );
       if (result.agentSession != null) {
         _agentSession = result.agentSession;
@@ -1261,6 +1291,21 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
               });
             },
             onUploadDoc: (n, t) => _requireAccount(() => _uploadDoc(n, t)),
+            onUploadAttachment: (name, bytes) async {
+              if (!widget.api.isLoggedIn) {
+                throw ApiException('Login dulu untuk upload file.');
+              }
+              return widget.api.uploadFile(name: name, bytes: bytes);
+            },
+            onFetchLibrary: () async {
+              if (!widget.api.isLoggedIn) {
+                throw ApiException('Login dulu untuk lihat Library.');
+              }
+              final res = await widget.api.getLibrary();
+              final items = res['items'];
+              if (items is! List) return <Map<String, dynamic>>[];
+              return items.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+            },
             onOpenCodeInterpreter: () => _requireAuth(() {
               _openCodeInterpreter();
             }),

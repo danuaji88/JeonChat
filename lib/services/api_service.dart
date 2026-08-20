@@ -231,6 +231,11 @@ class ApiService {
     return (data is Map<String, dynamic>) ? data : <String, dynamic>{};
   }
 
+  /// Daftar file yang pernah diupload user (maks 50 item terbaru) via
+  /// /library — dipakai menu "+" → "Tambah dari Library" di input bar.
+  /// {items: [{name, url, kind, size, uploaded_at}], total}.
+  Future<Map<String, dynamic>> getLibrary() => _get('/library', timeout: const Duration(seconds: 30));
+
   /// Langkah 1 login WhatsApp/HP — minta OTP dikirim ke [phone]. Respons:
   /// {ok, message, dev_hint, expires_in} — dev_hint = OTP sementara selama
   /// belum ada gateway SMS/WA asli.
@@ -560,11 +565,21 @@ class ApiService {
   /// dikirim ke backend supaya pilihan Fast/High/Think/Vision/Opus di input
   /// bar juga berlaku untuk request yang lewat /agent, bukan cuma fallback
   /// /chat.
+  /// [imageUrl]/[attachmentUrl] — URL file yang sudah diupload user lewat
+  /// menu "+" (Upload Gambar/Upload File/Tambah dari Library, lihat
+  /// input_bar.dart) dan mau disertakan bersama pesan ini. Belum ada kontrak
+  /// resmi dari backend untuk field ini di /agent (beda dari /upload/file &
+  /// /library yang sudah dikonfirmasi) — nama field dipilih mengikuti saran
+  /// eksplisit dari task, dan URL-nya JUGA disisipkan sebagai teks di
+  /// [prompt] (lihat pemanggil di chat_screen.dart) sebagai jaring pengaman
+  /// kalau field JSON ini ternyata tidak diparse backend.
   Future<AgentResult> sendAgentPrompt({
     required String prompt,
     required String model,
     String? agentSession,
     List<String> plugins = const [],
+    String? imageUrl,
+    String? attachmentUrl,
   }) async {
     if (!isConfigured) {
       throw ApiException('Base URL belum diatur. Buka Settings untuk isi URL backend.');
@@ -578,6 +593,8 @@ class ApiService {
         'model': model,
         if (agentSession != null) 'session_id': agentSession,
         if (plugins.isNotEmpty) 'plugins': plugins,
+        if (imageUrl != null && imageUrl.isNotEmpty) 'image_url': imageUrl,
+        if (attachmentUrl != null && attachmentUrl.isNotEmpty) 'attachment_url': attachmentUrl,
       };
       final res = await http
           .post(_uri('/agent'), headers: _headers, body: jsonEncode(body))
@@ -585,7 +602,8 @@ class ApiService {
 
       if (res.statusCode == 504) {
         // Timeout sync → fallback ke async
-        return await _agentSubmitPoll(prompt, model, agentSession, plugins);
+        return await _agentSubmitPoll(prompt, model, agentSession, plugins,
+            imageUrl: imageUrl, attachmentUrl: attachmentUrl);
       }
       if (res.statusCode != 200) {
         throw ApiException('Agent gagal (${res.statusCode}): ${res.body}');
@@ -602,18 +620,22 @@ class ApiService {
       );
     } on AgentTimeoutException {
       // Sync timeout → fallback ke async submit+poll
-      return await _agentSubmitPoll(prompt, model, agentSession, plugins);
+      return await _agentSubmitPoll(prompt, model, agentSession, plugins,
+          imageUrl: imageUrl, attachmentUrl: attachmentUrl);
     }
   }
 
   Future<AgentResult> _agentSubmitPoll(
-      String prompt, String model, String? agentSession, List<String> plugins) async {
+      String prompt, String model, String? agentSession, List<String> plugins,
+      {String? imageUrl, String? attachmentUrl}) async {
     // Submit task
     final submitBody = {
       'prompt': prompt,
       'model': model,
       if (agentSession != null) 'session_id': agentSession,
       if (plugins.isNotEmpty) 'plugins': plugins,
+      if (imageUrl != null && imageUrl.isNotEmpty) 'image_url': imageUrl,
+      if (attachmentUrl != null && attachmentUrl.isNotEmpty) 'attachment_url': attachmentUrl,
     };
     final submitRes = await http
         .post(_uri('/agent/submit'), headers: _headers, body: jsonEncode(submitBody))
