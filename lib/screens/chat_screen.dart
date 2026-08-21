@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:cross_file/cross_file.dart';
@@ -1254,16 +1255,49 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
         });
         return;
       }
+      // Kuota/rate-limit (429) BUKAN soal kalimat kurang jelas — rephrase
+      // tidak pernah menyelesaikannya, jadi pesannya dibedakan dari error
+      // generik lain (lihat _friendlyQuotaMessage).
+      final quotaMessage = _friendlyQuotaMessage(msg);
       _resolveTyping(typing, ChatMessage(
         isUser: false,
-        text: '⚠️ Gagal memproses permintaan media.\n\n'
-            'Detail: $e\n\n'
-            'Coba ulangi dengan kalimat lebih jelas, misal "buat video kucing oren".',
+        text: quotaMessage != null
+            ? '⚠️ $quotaMessage'
+            : '⚠️ Gagal memproses permintaan media.\n\n'
+                'Detail: $msg\n\n'
+                'Coba ulangi dengan kalimat lebih jelas, misal "buat video kucing oren".',
       ));
       _saveHistory();
     } finally {
       _scrollToBottom();
     }
+  }
+
+  /// Coba baca pesan kuota/rate-limit yang ramah dari body error backend
+  /// (mis. {"error":"quota_habis","message":"Kuota video hari ini habis
+  /// (limit 0). Upgrade paket atau tunggu besok."}, lihat ApiException di
+  /// api_service.dart yang menyisipkan res.body apa adanya ke pesan error)
+  /// — dipakai APA ADANYA kalau ketemu, karena backend sudah menulisnya
+  /// dengan jelas. Null kalau bukan error 429 (fallback ke pesan generik
+  /// lama yang menyarankan rephrase kalimat, yang MASIH relevan untuk
+  /// error selain kuota/rate-limit).
+  String? _friendlyQuotaMessage(String rawError) {
+    if (!rawError.contains('(429)')) return null;
+    final braceIndex = rawError.indexOf('{');
+    if (braceIndex != -1) {
+      try {
+        final decoded = jsonDecode(rawError.substring(braceIndex));
+        if (decoded is Map) {
+          final msg = decoded['message']?.toString().trim();
+          if (msg != null && msg.isNotEmpty) return msg;
+        }
+      } catch (_) {
+        // Body bukan JSON valid — jatuh ke fallback rate-limit generik di bawah.
+      }
+    }
+    // 429 tanpa body terstruktur (mis. provider TTS rate-limit) — tetap
+    // bukan soal kalimat kurang jelas.
+    return 'Server sedang sibuk atau kuota harian habis. Coba lagi beberapa saat lagi atau besok.';
   }
 
   Future<void> _handleChatRequest(String text, String model, ChatMessage typing,

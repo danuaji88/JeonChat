@@ -908,7 +908,7 @@ class ApiService {
         }))
         .timeout(const Duration(seconds: 60));
     if (res.statusCode != 200) {
-      throw ApiException('TTS gagal (${res.statusCode})');
+      throw ApiException('TTS gagal (${res.statusCode}): ${res.body}');
     }
     final data = jsonDecode(res.body) as Map<String, dynamic>;
     return (data['audio_url'] ?? data['url'] ?? data['audioUrl'])?.toString() ?? '';
