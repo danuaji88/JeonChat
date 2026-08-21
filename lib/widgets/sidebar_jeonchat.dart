@@ -46,7 +46,12 @@ class JeonChatSidebar extends StatefulWidget {
   final List<Map<String, dynamic>> projects;
   final String? activeProjectId;
   final ValueChanged<String?> onSelectProject;
-  final Future<void> Function(String name, String color, String icon) onCreateProject;
+
+  /// Tap baris project (fase 2.2) — buka ProjectDetailScreen (chats/files/
+  /// instruksi project). Beda dari [onSelectProject] yang cuma filter daftar
+  /// chat di sidebar ini (masih dipakai lewat menu "Project home").
+  final ValueChanged<String> onOpenProject;
+  final Future<void> Function(String name, String color, String icon, String instructions) onCreateProject;
   final void Function(String id, String name) onRenameProject;
   final Future<void> Function(String id, {required String name, required String description, required String color, required String icon}) onUpdateProjectSettings;
   final void Function(String id, bool pinned) onPinProject;
@@ -70,6 +75,7 @@ class JeonChatSidebar extends StatefulWidget {
     required this.projects,
     required this.activeProjectId,
     required this.onSelectProject,
+    required this.onOpenProject,
     required this.onCreateProject,
     required this.onRenameProject,
     required this.onUpdateProjectSettings,
@@ -491,7 +497,7 @@ class _JeonChatSidebarState extends State<JeonChatSidebar> {
       child: InkWell(
         borderRadius: BorderRadius.circular(8),
         hoverColor: active ? _activeBg : _hoverBg,
-        onTap: () => widget.onSelectProject(active ? null : id),
+        onTap: () => widget.onOpenProject(id),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
           child: Row(
@@ -822,6 +828,7 @@ class _JeonChatSidebarState extends State<JeonChatSidebar> {
 
   Future<void> _createProjectDialog() async {
     final controller = TextEditingController();
+    final instructionsController = TextEditingController();
     String selectedColor = _projectColors.first;
     String selectedIcon = _projectIcons.keys.first;
 
@@ -855,6 +862,26 @@ class _JeonChatSidebarState extends State<JeonChatSidebar> {
                   fillColor: const Color(0xFF262626),
                   isDense: true,
                   contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text('Instruksi (opsional)',
+                    style: TextStyle(fontSize: 11.5, color: _inkFaint, fontWeight: FontWeight.w600)),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: instructionsController,
+                maxLines: 3,
+                style: const TextStyle(fontSize: 13.4, color: _ink),
+                decoration: InputDecoration(
+                  hintText: 'Contoh: Bahasa santai, fokus penjualan',
+                  hintStyle: const TextStyle(color: _inkFaint),
+                  filled: true,
+                  fillColor: const Color(0xFF262626),
+                  contentPadding: const EdgeInsets.all(12),
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
                 ),
               ),
@@ -933,7 +960,7 @@ class _JeonChatSidebarState extends State<JeonChatSidebar> {
 
     final name = controller.text.trim();
     if (created == true && name.isNotEmpty) {
-      await widget.onCreateProject(name, selectedColor, selectedIcon);
+      await widget.onCreateProject(name, selectedColor, selectedIcon, instructionsController.text.trim());
     }
   }
 

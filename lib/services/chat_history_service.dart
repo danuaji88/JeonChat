@@ -196,6 +196,12 @@ class ChatHistoryService {
     });
     await _writeConversations(prefs, list);
     await pushToServer();
+    if (projectId != null) {
+      // Best-effort — chat tetap dibuat lokal walau ini gagal (mis. offline/guest).
+      try {
+        await _api?.addConversationToProject(projectId, id);
+      } catch (_) {}
+    }
     return id;
   }
 
@@ -272,9 +278,20 @@ class ChatHistoryService {
     final list = await _readConversations(prefs);
     final idx = list.indexWhere((c) => c['id'] == id);
     if (idx == -1) return;
+    final oldProjectId = list[idx]['projectId'] as String?;
     list[idx] = {...list[idx], 'projectId': projectId};
     await _writeConversations(prefs, list);
     await pushToServer();
+    // Best-effort sync ke backend /projects — kegagalan di sini tidak boleh
+    // menggagalkan pemindahan lokal (yang sudah ditulis di atas).
+    try {
+      if (oldProjectId != null && oldProjectId != projectId) {
+        await _api?.removeConversationFromProject(oldProjectId, id);
+      }
+      if (projectId != null && projectId != oldProjectId) {
+        await _api?.addConversationToProject(projectId, id);
+      }
+    } catch (_) {}
   }
 
   static Future<void> deleteConversation(String id) async {
@@ -387,20 +404,31 @@ class ChatHistoryService {
     return filtered;
   }
 
+  /// [id] project dicoba diambil dari backend /projects (create) dulu supaya
+  /// instruksinya bisa disuntikkan ke AI lewat project_id di /chat & /agent
+  /// (lihat ApiService.createProject) — kalau gagal (offline/guest/error),
+  /// fallback ke id lokal seperti sebelumnya, project tetap kebentuk lokal.
   static Future<String> createProject({
     required String name,
     required String color,
     required String icon,
     String description = '',
+    String instructions = '',
   }) async {
     final prefs = await SharedPreferences.getInstance();
     final list = await _readProjects(prefs);
     final now = DateTime.now().millisecondsSinceEpoch;
-    final id = 'proj_${now}_${list.length}';
+    String id = 'proj_${now}_${list.length}';
+    try {
+      final remote = await _api?.createProject(name: name, instructions: instructions);
+      final remoteId = remote?['id']?.toString();
+      if (remoteId != null && remoteId.isNotEmpty) id = remoteId;
+    } catch (_) {}
     list.add({
       'id': id,
       'name': name,
       'description': description,
+      'instructions': instructions,
       'color': color,
       'icon': icon,
       'pinned': false,
@@ -420,9 +448,13 @@ class ChatHistoryService {
     list[idx] = {...list[idx], 'name': name};
     await _writeProjects(prefs, list);
     await pushToServer();
+    try {
+      await _api?.updateProject(id, name: name);
+    } catch (_) {}
   }
 
   /// Update lengkap dari halaman "Project settings" — nama, deskripsi, warna, ikon.
+  /// (deskripsi/warna/ikon murni lokal, tidak dikenal backend /projects.)
   static Future<void> updateProjectSettings(
     String id, {
     required String name,
@@ -443,6 +475,24 @@ class ChatHistoryService {
     };
     await _writeProjects(prefs, list);
     await pushToServer();
+    try {
+      await _api?.updateProject(id, name: name);
+    } catch (_) {}
+  }
+
+  /// Update instruksi AI project — dipanggil dari tab "Instruksi" di
+  /// ProjectDetailScreen (fase 2.2). Terpisah dari [updateProjectSettings]
+  /// karena layar itu tidak (perlu) tahu deskripsi/warna/ikon project.
+  static Future<void> updateProjectInstructions(String id, String instructions) async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = await _readProjects(prefs);
+    final idx = list.indexWhere((p) => p['id'] == id);
+    if (idx != -1) {
+      list[idx] = {...list[idx], 'instructions': instructions};
+      await _writeProjects(prefs, list);
+      await pushToServer();
+    }
+    await _api?.updateProject(id, instructions: instructions);
   }
 
   static Future<void> pinProject(String id, bool pinned) async {
@@ -483,5 +533,8 @@ class ChatHistoryService {
     }
     if (changed) await _writeConversations(prefs, conversations);
     await pushToServer();
+    try {
+      await _api?.deleteProject(id);
+    } catch (_) {}
   }
 }

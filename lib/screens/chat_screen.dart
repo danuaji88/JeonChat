@@ -16,6 +16,7 @@ import 'code_screen.dart';
 import 'image_edit_screen.dart';
 import 'library_screen.dart';
 import 'plugins_screen.dart';
+import 'project_detail_screen.dart';
 import 'register_screen.dart';
 import 'skill_list_screen.dart';
 import 'skills_screen.dart';
@@ -68,6 +69,22 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
   // ---- Projects ----
   List<Map<String, dynamic>> _projects = [];
   String? _activeProjectId;
+
+  /// Project yang MEMILIKI percakapan aktif saat ini (beda dari
+  /// [_activeProjectId], yang cuma filter tampilan sidebar) — dipakai untuk
+  /// kirim project_id ke /chat & /agent (fase 2.2, lihat _handleChatRequest
+  /// dkk.) dan badge "📁 nama project" di header.
+  Map<String, dynamic>? get _activeConversationProject {
+    final convId = _conversationId;
+    if (convId == null) return null;
+    final conv = _conversations.firstWhere((c) => c['id'] == convId, orElse: () => const {});
+    final projectId = conv['projectId'] as String?;
+    if (projectId == null) return null;
+    for (final p in _projects) {
+      if (p['id'] == projectId) return p;
+    }
+    return null;
+  }
 
   // ---- Plugin Store (area chat digantikan, sidebar tetap terlihat) ----
   bool _showPluginsStore = false;
@@ -360,9 +377,35 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     setState(() => _projects = projects);
   }
 
-  Future<void> _createProject(String name, String color, String icon) async {
-    await ChatHistoryService.createProject(name: name, color: color, icon: icon);
+  Future<void> _createProject(String name, String color, String icon, String instructions) async {
+    await ChatHistoryService.createProject(name: name, color: color, icon: icon, instructions: instructions);
     await _refreshProjects();
+  }
+
+  /// Buka detail project (fase 2.2) — tap ke chat/buat chat baru di
+  /// dalamnya dipulangkan lewat hasil pop, project dihapus/diubah memicu
+  /// refresh daftar project di sidebar.
+  Future<void> _openProjectDetail(String id) async {
+    final project = _projects.firstWhere((p) => p['id'] == id, orElse: () => {'id': id, 'name': 'Project'});
+    final result = await Navigator.of(context).push<Map<String, dynamic>>(
+      MaterialPageRoute(
+        builder: (_) => ProjectDetailScreen(api: widget.api, project: project, onChanged: _refreshProjects),
+      ),
+    );
+    if (result == null || !mounted) return;
+    switch (result['action']) {
+      case 'open_chat':
+        final convId = result['conversationId'] as String?;
+        if (convId != null) await _openChat(convId);
+        break;
+      case 'new_chat':
+        await _newChat(projectId: result['projectId'] as String?);
+        break;
+      case 'deleted':
+        if (_activeProjectId == result['projectId']) setState(() => _activeProjectId = null);
+        await _refreshProjects();
+        break;
+    }
   }
 
   Future<void> _renameProject(String id, String name) async {
@@ -410,6 +453,52 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     setState(() => _conversations = list);
   }
 
+  /// Tombol header "Simpan ke project" (fase 2.2) — chat yang belum masuk
+  /// project manapun bisa ditambahkan lewat sini, tanpa harus lewat sidebar.
+  Future<void> _saveToProjectDialog() async {
+    final id = _conversationId;
+    if (id == null) return;
+    if (_projects.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Belum ada project. Buat project dulu lewat sidebar.')),
+      );
+      return;
+    }
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: JeonColors.surface,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text('Simpan ke project',
+                    style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600, color: JeonColors.ink)),
+              ),
+            ),
+            ..._projects.map((p) => ListTile(
+                  leading: const Icon(Icons.folder_outlined, size: 18, color: JeonColors.inkMuted),
+                  title: Text(p['name']?.toString() ?? 'Project',
+                      style: const TextStyle(fontSize: 13.6, color: JeonColors.ink)),
+                  onTap: () => Navigator.of(sheetContext).pop(p['id'] as String),
+                )),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (selected == null) return;
+    await _moveToProject(id, selected);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Chat disimpan ke project'), duration: Duration(seconds: 1)),
+    );
+  }
+
   /// Dipanggil di setiap titik yang tadinya panggil "_saveHistory()" —
   /// simpan pesan-pesan ke percakapan aktif lalu segarkan daftar sidebar.
   ///
@@ -445,8 +534,8 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     });
   }
 
-  Future<void> _newChat() async {
-    final id = await ChatHistoryService.createConversation(projectId: _activeProjectId);
+  Future<void> _newChat({String? projectId}) async {
+    final id = await ChatHistoryService.createConversation(projectId: projectId ?? _activeProjectId);
     final list = await ChatHistoryService.listConversations();
     if (!mounted) return;
     setState(() {
@@ -875,7 +964,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     });
     try {
       final reply =
-          await widget.api.sendChat(history: _cleanHistory(), model: _lastModel, cancelToken: cancelToken, incognito: _incognito);
+          await widget.api.sendChat(history: _cleanHistory(), model: _lastModel, cancelToken: cancelToken, incognito: _incognito, projectId: _activeConversationProject?['id'] as String?);
       final parsed = _extractAutoLearn(reply);
       _resolveTyping(typing, ChatMessage(isUser: false, text: parsed.text, autoLearnSkill: parsed.autoLearnSkill));
     } on RequestCancelledException {
@@ -894,7 +983,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       _activeCancelToken = cancelToken;
     });
     try {
-      final reply = await widget.api.sendChat(history: _cleanHistory(), model: model, cancelToken: cancelToken, incognito: _incognito);
+      final reply = await widget.api.sendChat(history: _cleanHistory(), model: model, cancelToken: cancelToken, incognito: _incognito, projectId: _activeConversationProject?['id'] as String?);
       _resolveTyping(typing, ChatMessage(isUser: false, text: reply));
     } on RequestCancelledException {
       _resolveTyping(typing, const ChatMessage(isUser: false, text: 'Dihentikan.'));
@@ -995,6 +1084,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
         imageUrl: imageUrl,
         attachmentUrl: attachmentUrl,
         cancelToken: cancelToken,
+        projectId: _activeConversationProject?['id'] as String?,
       );
       if (result.agentSession != null) {
         _agentSession = result.agentSession;
@@ -1011,7 +1101,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     } on AgentTimeoutException {
       // Agent timeout — auto-fallback ke /chat
       try {
-        final reply = await widget.api.sendChat(history: _cleanHistory(), model: model, cancelToken: cancelToken, incognito: _incognito);
+        final reply = await widget.api.sendChat(history: _cleanHistory(), model: model, cancelToken: cancelToken, incognito: _incognito, projectId: _activeConversationProject?['id'] as String?);
         final parsed = _extractAutoLearn(reply);
         _resolveTyping(typing, ChatMessage(isUser: false, text: parsed.text, autoLearnSkill: parsed.autoLearnSkill));
         _saveHistory();
@@ -1026,7 +1116,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     } catch (e) {
       // Fallback ke /chat kalau /agent gagal
       try {
-        final reply = await widget.api.sendChat(history: _cleanHistory(), model: model, cancelToken: cancelToken, incognito: _incognito);
+        final reply = await widget.api.sendChat(history: _cleanHistory(), model: model, cancelToken: cancelToken, incognito: _incognito, projectId: _activeConversationProject?['id'] as String?);
         final parsed = _extractAutoLearn(reply);
         _resolveTyping(typing, ChatMessage(isUser: false, text: parsed.text, autoLearnSkill: parsed.autoLearnSkill));
         _saveHistory();
@@ -1308,6 +1398,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       projects: _projects,
       activeProjectId: _activeProjectId,
       onSelectProject: _selectProject,
+      onOpenProject: _openProjectDetail,
       onCreateProject: _createProject,
       onRenameProject: _renameProject,
       onUpdateProjectSettings: _updateProjectSettings,
@@ -1417,6 +1508,33 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
                 ),
               ],
             ),
+            if (_activeConversationProject != null) ...[
+              const SizedBox(width: 8),
+              Flexible(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: JeonColors.accent.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.folder, size: 12, color: JeonColors.accent),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          (_activeConversationProject!['name'] ?? 'Project').toString(),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: JeonColors.accent),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
             if (_incognito) ...[
               const SizedBox(width: 8),
               Container(
@@ -1432,6 +1550,12 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
           ],
         ),
         actions: [
+          if (_conversationId != null && _activeConversationProject == null)
+            IconButton(
+              icon: const Icon(Icons.drive_file_move_outline, size: 20, color: JeonColors.inkMuted),
+              tooltip: 'Simpan ke project',
+              onPressed: _saveToProjectDialog,
+            ),
           IconButton(
             icon: const Icon(Icons.record_voice_over_outlined, size: 20, color: JeonColors.inkMuted),
             tooltip: 'Pilih Suara',

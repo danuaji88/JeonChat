@@ -451,6 +451,61 @@ class ApiService {
     return (res['results'] as List?) ?? [];
   }
 
+  // ---- Projects/Workspaces (fase 2.2) — grup chat+file+instruksi khusus
+  // per project via /projects (action list/create/get/update/delete/
+  // add_file/remove_file/add_conversation/remove_conversation). Entity ini
+  // BEDA dari project lokal punya ChatHistoryService (warna/ikon/pin/arsip,
+  // cuma buat filter sidebar, tidak dikenal backend) — dua-duanya dipakai
+  // bareng: ChatHistoryService.createProject dkk. sekarang memanggil method
+  // di bawah ini juga supaya id project lokal = id project backend, dan
+  // instruksinya bisa disuntikkan AI lewat project_id di /chat & /agent. ----
+
+  Future<List<Map<String, dynamic>>> listProjects() async {
+    final res = await _post('/projects', {'action': 'list'});
+    final raw = res['projects'] as List?;
+    return raw?.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList() ?? [];
+  }
+
+  Future<Map<String, dynamic>> createProject({required String name, String instructions = ''}) async {
+    final res = await _post('/projects', {'action': 'create', 'name': name, 'instructions': instructions});
+    final project = res['project'];
+    return project is Map ? Map<String, dynamic>.from(project) : {};
+  }
+
+  Future<Map<String, dynamic>?> getProject(String id) async {
+    final res = await _post('/projects', {'action': 'get', 'id': id});
+    final project = res['project'];
+    return project is Map ? Map<String, dynamic>.from(project) : null;
+  }
+
+  Future<Map<String, dynamic>> updateProject(String id, {String? name, String? instructions}) async {
+    final res = await _post('/projects', {
+      'action': 'update',
+      'id': id,
+      if (name != null) 'name': name,
+      if (instructions != null) 'instructions': instructions,
+    });
+    final project = res['project'];
+    return project is Map ? Map<String, dynamic>.from(project) : {};
+  }
+
+  Future<void> deleteProject(String id) => _post('/projects', {'action': 'delete', 'id': id});
+
+  Future<Map<String, dynamic>> addFileToProject(String id, Map<String, dynamic> file) async {
+    final res = await _post('/projects', {'action': 'add_file', 'id': id, 'file': file});
+    final f = res['file'];
+    return f is Map ? Map<String, dynamic>.from(f) : file;
+  }
+
+  Future<void> removeFileFromProject(String id, String fileId) =>
+      _post('/projects', {'action': 'remove_file', 'id': id, 'file_id': fileId});
+
+  Future<void> addConversationToProject(String id, String conversationId) =>
+      _post('/projects', {'action': 'add_conversation', 'id': id, 'conversation_id': conversationId});
+
+  Future<void> removeConversationFromProject(String id, String conversationId) =>
+      _post('/projects', {'action': 'remove_conversation', 'id': id, 'conversation_id': conversationId});
+
   /// Web search via /websearch.
   Future<List<dynamic>> webSearch(String query) async {
     final res = await _post('/websearch', {'query': query, 'max_results': 5}, timeout: const Duration(seconds: 30));
@@ -560,6 +615,7 @@ class ApiService {
     String? sessionId,
     CancelToken? cancelToken,
     bool incognito = false,
+    String? projectId,
   }) async {
     if (!isConfigured) {
       throw ApiException('Base URL belum diatur. Buka Settings untuk isi URL backend.');
@@ -573,6 +629,7 @@ class ApiService {
       'model': model,
       if (sessionId != null && sessionId.isNotEmpty) 'session_id': sessionId,
       if (incognito) 'incognito': true,
+      if (projectId != null && projectId.isNotEmpty) 'project_id': projectId,
     };
     final client = http.Client();
     cancelToken?._client = client;
@@ -620,6 +677,7 @@ class ApiService {
     String? imageUrl,
     String? attachmentUrl,
     CancelToken? cancelToken,
+    String? projectId,
   }) async {
     if (!isConfigured) {
       throw ApiException('Base URL belum diatur. Buka Settings untuk isi URL backend.');
@@ -640,6 +698,11 @@ class ApiService {
         if (plugins.isNotEmpty) 'plugins': plugins,
         if (imageUrl != null && imageUrl.isNotEmpty) 'image_url': imageUrl,
         if (attachmentUrl != null && attachmentUrl.isNotEmpty) 'attachment_url': attachmentUrl,
+        // Kontrak backend cuma mengonfirmasi project_id di /chat (lihat
+        // task) — disisipkan juga di /agent sebagai jaring pengaman
+        // (pola sama seperti image_url/attachment_url di atas), TIDAK
+        // dijamin backend /agent benar-benar memprosesnya.
+        if (projectId != null && projectId.isNotEmpty) 'project_id': projectId,
       };
       final res = await client
           .post(_uri('/agent'), headers: _headers, body: jsonEncode(body))
@@ -648,7 +711,8 @@ class ApiService {
       if (res.statusCode == 504) {
         // Timeout sync → fallback ke async
         return await _agentSubmitPoll(prompt, model, agentSession, plugins,
-            imageUrl: imageUrl, attachmentUrl: attachmentUrl, client: client, cancelToken: cancelToken);
+            imageUrl: imageUrl, attachmentUrl: attachmentUrl, client: client, cancelToken: cancelToken,
+            projectId: projectId);
       }
       if (res.statusCode != 200) {
         throw ApiException('Agent gagal (${res.statusCode}): ${res.body}');
@@ -666,7 +730,8 @@ class ApiService {
     } on AgentTimeoutException {
       // Sync timeout → fallback ke async submit+poll
       return await _agentSubmitPoll(prompt, model, agentSession, plugins,
-          imageUrl: imageUrl, attachmentUrl: attachmentUrl, client: client, cancelToken: cancelToken);
+          imageUrl: imageUrl, attachmentUrl: attachmentUrl, client: client, cancelToken: cancelToken,
+          projectId: projectId);
     } on http.ClientException {
       if (cancelToken?.isCancelled == true) throw RequestCancelledException();
       rethrow;
@@ -680,7 +745,8 @@ class ApiService {
       {String? imageUrl,
       String? attachmentUrl,
       required http.Client client,
-      CancelToken? cancelToken}) async {
+      CancelToken? cancelToken,
+      String? projectId}) async {
     // Submit task
     final submitBody = {
       'prompt': prompt,
@@ -689,6 +755,7 @@ class ApiService {
       if (plugins.isNotEmpty) 'plugins': plugins,
       if (imageUrl != null && imageUrl.isNotEmpty) 'image_url': imageUrl,
       if (attachmentUrl != null && attachmentUrl.isNotEmpty) 'attachment_url': attachmentUrl,
+      if (projectId != null && projectId.isNotEmpty) 'project_id': projectId,
     };
     http.Response submitRes;
     try {
