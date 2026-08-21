@@ -4,6 +4,7 @@ import '../services/api_service.dart';
 import '../services/profile_service.dart';
 import '../services/settings_service.dart';
 import '../theme.dart';
+import 'connectors_screen.dart';
 import 'custom_instructions_screen.dart';
 import 'login_screen.dart';
 import 'memory_screen.dart';
@@ -181,10 +182,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
       body: ListView.separated(
         padding: const EdgeInsets.symmetric(vertical: 8),
-        itemCount: SettingsCategory.values.length,
+        // +1: baris "Integrasi Google" (fase 3.2) ditaruh sebagai item ke-0,
+        // berdiri sendiri di luar enum SettingsCategory — item lain digeser
+        // (index i - 1) supaya tetap satu ListView.separated yang sama
+        // (divider antar-item tetap konsisten sepanjang daftar).
+        itemCount: SettingsCategory.values.length + 1,
         separatorBuilder: (_, __) => const Divider(color: JeonColors.borderSoft, height: 1, indent: 56),
         itemBuilder: (context, i) {
-          final cat = SettingsCategory.values[i];
+          if (i == 0) {
+            return ListTile(
+              leading: const Icon(Icons.cloud_outlined, size: 19, color: JeonColors.inkMuted),
+              title: const Text('Integrasi Google', style: TextStyle(fontSize: 13.6, color: JeonColors.ink)),
+              subtitle: const Text('Gmail · Calendar · Drive · Sheets',
+                  style: TextStyle(fontSize: 10.5, color: JeonColors.inkFaint)),
+              trailing: const Icon(Icons.chevron_right, size: 18, color: JeonColors.inkFaint),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => ConnectorsScreen(api: widget.api),
+              )),
+            );
+          }
+          final cat = SettingsCategory.values[i - 1];
           final isUserSkills = cat == SettingsCategory.userSkills;
           final isVoice = cat == SettingsCategory.voice;
           final isCustomInstructions = cat == SettingsCategory.customInstructions;

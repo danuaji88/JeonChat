@@ -1025,6 +1025,23 @@ class ApiService {
     final res = await _post('/share', {'action': format, 'conv_id': convId});
     return (res['content'] ?? '').toString();
   }
+
+  // ---- Integrasi Google / Connectors (fase 3.2 UI) via /connectors —
+  // action status/auth_url/disconnect/<connector_action>/detect. Backend
+  // ambil email user dari token Bearer sendiri (_token_to_email) — JANGAN
+  // kirim 'email' di body manapun di bawah ini. ----
+
+  Future<Map<String, dynamic>> connectorStatus() => _post('/connectors', {'action': 'status'});
+
+  Future<Map<String, dynamic>> connectorAuthUrl() => _post('/connectors', {'action': 'auth_url'});
+
+  Future<Map<String, dynamic>> connectorDisconnect() => _post('/connectors', {'action': 'disconnect'});
+
+  Future<Map<String, dynamic>> connectorAction(String action, Map<String, dynamic> params) =>
+      _post('/connectors', {'action': action, 'params': params});
+
+  Future<Map<String, dynamic>> connectorDetect(String text) =>
+      _post('/connectors', {'action': 'detect', 'params': {'text': text}});
 }
 
 /// Satu opsi di dropdown model input bar — dari GET /models 'options' atau
