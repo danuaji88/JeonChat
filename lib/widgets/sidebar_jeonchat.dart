@@ -30,6 +30,13 @@ class JeonChatSidebar extends StatefulWidget {
   final VoidCallback? onOpenScheduled;
   final VoidCallback? onOpenMore;
 
+  /// Nav "Buat Gambar"/"Buat Video" — tap langsung minta prompt lewat
+  /// dialog kecil (dikelola chat_screen.dart), lalu jalan lewat pipeline
+  /// generate yang sudah ada (_generateImageDirect/_generateVideoDirect,
+  /// termasuk dialog pilih tier).
+  final VoidCallback? onGenerateImage;
+  final VoidCallback? onGenerateVideo;
+
   /// Buka TasksScreen (fase 3.3, "Tugas Terjadwal"). Null = entri "Tugas"
   /// tetap tampil tapi tap-nya no-op.
   final VoidCallback? onOpenTasks;
@@ -99,6 +106,8 @@ class JeonChatSidebar extends StatefulWidget {
     this.onOpenPlugins,
     this.onOpenScheduled,
     this.onOpenMore,
+    this.onGenerateImage,
+    this.onGenerateVideo,
     this.onOpenTasks,
     this.unreadCount = 0,
     this.installedPlugins = const [],
@@ -180,9 +189,6 @@ class _JeonChatSidebarState extends State<JeonChatSidebar> {
           _modeToggle(),
           const SizedBox(height: 6),
           _navItem(Icons.auto_stories_outlined, 'Library', onTap: widget.onOpenLibrary, locked: !widget.api.isLoggedIn),
-          _navItem(Icons.code_rounded, 'Code', onTap: widget.onOpenScheduled, locked: !widget.api.isLoggedIn),
-          _navItem(Icons.extension_outlined, 'Plugins', onTap: widget.onOpenPlugins, locked: !widget.api.isLoggedIn),
-          _navItem(Icons.auto_awesome_outlined, 'Skills', onTap: widget.onOpenMore, locked: !widget.api.isLoggedIn),
           _navItem(
             Icons.schedule_outlined,
             'Tugas',
@@ -195,6 +201,10 @@ class _JeonChatSidebarState extends State<JeonChatSidebar> {
                   )
                 : null,
           ),
+          _navItem(Icons.extension_outlined, 'Plugins', onTap: widget.onOpenPlugins, locked: !widget.api.isLoggedIn),
+          _navItem(Icons.image_outlined, 'Buat Gambar', onTap: widget.onGenerateImage, locked: !widget.api.isLoggedIn),
+          _navItem(Icons.movie_outlined, 'Buat Video', onTap: widget.onGenerateVideo, locked: !widget.api.isLoggedIn),
+          _navItem(Icons.more_horiz, 'More', onTap: widget.onOpenMore, locked: !widget.api.isLoggedIn),
           if (widget.installedPlugins.isNotEmpty) ...[
             const SizedBox(height: 6),
             _myPluginsSection(),

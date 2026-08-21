@@ -1612,6 +1612,129 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     _scrollToBottom();
   }
 
+  /// Dialog kecil minta teks prompt — dipakai nav sidebar "Buat Gambar"/
+  /// "Buat Video" (beda dari tombol "+" input bar yang sudah dihapus
+  /// opsinya, tapi handler _generateImageDirect/_generateVideoDirect-nya
+  /// tetap sama). Null kalau user batal/kosongkan teks.
+  Future<String?> _promptTextDialog({required String title, required String hint}) async {
+    final controller = TextEditingController();
+    final result = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: JeonColors.surface,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+      builder: (sheetContext) => Padding(
+        padding: EdgeInsets.only(
+          left: 16,
+          right: 16,
+          top: 16,
+          bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 16,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(title, style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600, color: JeonColors.ink)),
+            const SizedBox(height: 10),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              maxLines: 2,
+              minLines: 1,
+              style: const TextStyle(fontSize: 13.4, color: JeonColors.ink),
+              decoration: InputDecoration(
+                hintText: hint,
+                hintStyle: const TextStyle(color: JeonColors.inkFaint),
+                filled: true,
+                fillColor: JeonColors.surface2,
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(JeonRadius.card),
+                  borderSide: const BorderSide(color: JeonColors.border),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(JeonRadius.card),
+                  borderSide: const BorderSide(color: JeonColors.border),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(JeonRadius.card),
+                  borderSide: const BorderSide(color: JeonColors.accent),
+                ),
+              ),
+              onSubmitted: (v) => Navigator.of(sheetContext).pop(v),
+            ),
+            const SizedBox(height: 14),
+            SizedBox(
+              height: 44,
+              child: ElevatedButton(
+                onPressed: () => Navigator.of(sheetContext).pop(controller.text.trim()),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: JeonColors.accent,
+                  foregroundColor: const Color(0xFF04150A),
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(JeonRadius.pill)),
+                ),
+                child: const Text('Buat', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    final trimmed = result?.trim();
+    return (trimmed == null || trimmed.isEmpty) ? null : trimmed;
+  }
+
+  /// Nav sidebar "Buat Gambar" — minta prompt lalu jalan lewat pipeline yang
+  /// sama dengan tombol "+" lama (dialog tier tetap muncul di dalamnya).
+  Future<void> _promptGenerateImage() async {
+    final prompt = await _promptTextDialog(title: 'Buat Gambar', hint: 'Gambar apa yang mau dibuat?');
+    if (prompt == null || !mounted) return;
+    await _generateImageDirect(prompt);
+  }
+
+  /// Nav sidebar "Buat Video" — sama polanya dengan [_promptGenerateImage].
+  Future<void> _promptGenerateVideo() async {
+    final prompt = await _promptTextDialog(title: 'Buat Video', hint: 'Video apa yang mau dibuat?');
+    if (prompt == null || !mounted) return;
+    await _generateVideoDirect(prompt);
+  }
+
+  /// Nav sidebar "More" — overflow fitur yang tidak dapat slot nav utama
+  /// (saat ini cuma Skills; wadah ini yang bikin gampang nambah entri lain
+  /// nanti tanpa bikin sidebar penuh).
+  void _openMoreMenu() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: JeonColors.surface,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 10),
+            Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(color: JeonColors.surface3, borderRadius: BorderRadius.circular(2)),
+            ),
+            const SizedBox(height: 6),
+            ListTile(
+              leading: const Icon(Icons.auto_awesome_outlined, size: 19, color: JeonColors.ink),
+              title: const Text('Skills', style: TextStyle(fontSize: 13.6, color: JeonColors.ink)),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                _openSkills();
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
   // Tidak ada endpoint /search khusus di backend — dikirim lewat /agent
   // (endpoint tools-lengkap) dengan instruksi eksplisit, bukan sekadar UI.
   Future<void> _searchWeb(String query) => _send('Cari di internet: $query', 'jeon-chat');
@@ -1792,7 +1915,15 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       },
       onOpenMore: () {
         if (!isWide) Navigator.of(context).maybePop();
-        _openSkills();
+        _openMoreMenu();
+      },
+      onGenerateImage: () {
+        if (!isWide) Navigator.of(context).maybePop();
+        _requireAccount(_promptGenerateImage);
+      },
+      onGenerateVideo: () {
+        if (!isWide) Navigator.of(context).maybePop();
+        _requireAccount(_promptGenerateVideo);
       },
       onOpenTasks: () {
         if (!isWide) Navigator.of(context).maybePop();
