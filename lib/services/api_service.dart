@@ -986,6 +986,24 @@ class ApiService {
   Future<void> markAllNotificationsRead() => _post('/notifications', {'action': 'mark_all_read'});
 
   Future<void> clearNotifications() => _post('/notifications', {'action': 'clear'});
+
+  // ---- Feedback Rating (fase 4.1) via /feedback — action rate/delete.
+  // [messageId] sintetis ("{conversationId}_{index}", lihat _messageId di
+  // chat_screen.dart) karena ChatMessage belum punya id asli dari backend.
+  // Kontrak /feedback tidak menyebutkan response 'rate' punya id feedback
+  // terpisah, jadi [deleteFeedback] dipanggil dengan messageId yang sama
+  // (satu pesan cuma bisa punya satu rating aktif, jadi messageId juga
+  // valid dipakai sebagai kunci hapus). ----
+
+  Future<Map<String, dynamic>> sendFeedback(String messageId, String rating, {String comment = ''}) =>
+      _post('/feedback', {
+        'action': 'rate',
+        'message_id': messageId,
+        'rating': rating,
+        'comment': comment,
+      });
+
+  Future<void> deleteFeedback(String id) => _post('/feedback', {'action': 'delete', 'id': id});
 }
 
 /// Satu opsi di dropdown model input bar — dari GET /models 'options' atau

@@ -163,6 +163,51 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
   int _unreadNotifications = 0;
   Timer? _notificationTimer;
 
+  // ---- Feedback Rating 👍/👎 (fase 4.1) — ChatMessage belum punya id asli
+  // dari backend, jadi dipakai id sintetis deterministik "{conversationId}_
+  // {index}" (lihat _messageId) — stabil selama posisi pesan itu tidak
+  // berubah. Mulai kosong tiap ganti/reload chat (tidak ada endpoint GET
+  // untuk ambil rating tersimpan dari backend, cuma rate/delete). ----
+  final Map<String, String> _feedbackRatings = {};
+
+  String _messageId(int index) => '${_conversationId}_$index';
+
+  Future<void> _handleFeedback(ChatMessage message, String? rating) async {
+    final index = _messages.indexWhere((m) => identical(m, message));
+    if (index == -1) return;
+    final messageId = _messageId(index);
+    final previous = _feedbackRatings[messageId];
+    try {
+      if (rating == null) {
+        await widget.api.deleteFeedback(messageId);
+        if (!mounted) return;
+        setState(() => _feedbackRatings.remove(messageId));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Penilaian dihapus'), duration: Duration(milliseconds: 1500)),
+        );
+      } else {
+        await widget.api.sendFeedback(messageId, rating);
+        if (!mounted) return;
+        setState(() => _feedbackRatings[messageId] = rating);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Terima kasih atas penilaiannya 🙏'), duration: Duration(milliseconds: 1500)),
+        );
+      }
+    } catch (e) {
+      // Rollback ke state sebelumnya kalau request gagal — UI tidak boleh
+      // "berbohong" soal rating yang sebenarnya belum tersimpan di server.
+      if (!mounted) return;
+      setState(() {
+        if (previous == null) {
+          _feedbackRatings.remove(messageId);
+        } else {
+          _feedbackRatings[messageId] = previous;
+        }
+      });
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Gagal kirim penilaian: $e')));
+    }
+  }
+
   // Deteksi kalimat "ingat ini..." / "kalau saya minta X selalu Y" — kalau
   // cocok, tawarkan simpan sebagai skill (opsional, tidak menghalangi alur
   // kirim pesan normal).
@@ -655,6 +700,9 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       // ArtifactPanel (fase 3.1) juga direset — artifact dari percakapan lama
       // tidak relevan lagi begitu pindah/mulai percakapan baru.
       _activeArtifact = null;
+      // Rating (fase 4.1) message_id-nya berbasis conversationId lama, jadi
+      // tidak nyambung ke percakapan baru — mulai kosong.
+      _feedbackRatings.clear();
     });
     _fadeInMessages();
   }
@@ -672,6 +720,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       _agentSession = conv['agentSession'] as String?;
       _incognito = false;
       _activeArtifact = null;
+      _feedbackRatings.clear();
       _messagesOpacity = 0.0;
       _showPluginsStore = false;
       _activeDocName = null;
@@ -1059,6 +1108,9 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     if (_isGenerating) return;
     final idx = _messages.indexWhere((m) => identical(m, aiMessage));
     if (idx <= 0) return;
+    // Index ini bakal ditempati jawaban BARU — rating lama (kalau ada) milik
+    // jawaban LAMA, jangan sampai nempel salah ke jawaban baru (fase 4.1).
+    _feedbackRatings.remove(_messageId(idx));
     final typing = ChatMessage(isUser: false, text: _thinkingText);
     setState(() => _messages = [..._messages.sublist(0, idx), typing]);
     await _saveHistory();
@@ -1798,6 +1850,8 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
                                   onRegenerateAiMessage: _regenerateMessage,
                                   onOpenArtifact: (a) => _openArtifact(a),
                                   onRunArtifact: (a) => _openArtifact(a, autoRun: true),
+                                  feedbackRating: _feedbackRatings[_messageId(i)],
+                                  onFeedback: _handleFeedback,
                                 ),
                           ),
                   ),

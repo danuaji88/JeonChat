@@ -12,6 +12,7 @@ import 'video_message_player.dart';
 
 const _thinkingPlaceholder = 'JeonAI Sedang Berpikir Lalu Eksekusi Mohon Ditunggu';
 const _analysisGreen = Color(0xFF2ECC71);
+const _feedbackUpGreen = Color(0xFF2EA043);
 
 class ChatBubble extends StatefulWidget {
   final ChatMessage message;
@@ -44,6 +45,18 @@ class ChatBubble extends StatefulWidget {
   /// (kartu tetap tampil kalau [onOpenArtifact] tersedia).
   final void Function(Artifact artifact)? onRunArtifact;
 
+  /// Rating feedback (👍/👎) untuk balasan AI ini saat ini — 'up'/'down'/null
+  /// (belum dinilai). Dikelola parent lewat _feedbackRatings (fase 4.1),
+  /// null kalau belum ada rating untuk pesan ini.
+  final String? feedbackRating;
+
+  /// Kirim/hapus rating (fase 4.1) — dipanggil dengan bubble AI yang dinilai
+  /// & rating baru: 'up'/'down' = kirim rating (ganti kalau beda dari
+  /// sebelumnya), null = hapus rating yang sudah ada (toggle-off). Parent
+  /// yang panggil ApiService.sendFeedback/deleteFeedback lalu update state.
+  /// Null = tombol thumbs disembunyikan.
+  final void Function(ChatMessage message, String? rating)? onFeedback;
+
   const ChatBubble({
     super.key,
     required this.message,
@@ -53,6 +66,8 @@ class ChatBubble extends StatefulWidget {
     this.onRegenerateAiMessage,
     this.onOpenArtifact,
     this.onRunArtifact,
+    this.feedbackRating,
+    this.onFeedback,
   });
 
   @override
@@ -127,6 +142,13 @@ class _ChatBubbleState extends State<ChatBubble> {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Disalin ke clipboard'), duration: Duration(seconds: 1)),
     );
+  }
+
+  /// Tap thumbs up/down (fase 4.1) — tap ulang tombol yang sudah aktif =
+  /// toggle-off (hapus rating), tap tombol lain/pertama kali = set rating.
+  void _handleFeedback(String rating) {
+    final next = widget.feedbackRating == rating ? null : rating;
+    widget.onFeedback?.call(widget.message, next);
   }
 
   @override
@@ -374,6 +396,32 @@ class _ChatBubbleState extends State<ChatBubble> {
                 child: Icon(Icons.refresh_rounded, size: 14, color: JeonColors.inkFaint),
               ),
             ),
+          if (widget.onFeedback != null) ...[
+            InkWell(
+              borderRadius: BorderRadius.circular(999),
+              onTap: () => _handleFeedback('up'),
+              child: Padding(
+                padding: const EdgeInsets.all(6),
+                child: Icon(
+                  widget.feedbackRating == 'up' ? Icons.thumb_up_rounded : Icons.thumb_up_outlined,
+                  size: 14,
+                  color: widget.feedbackRating == 'up' ? _feedbackUpGreen : JeonColors.inkFaint,
+                ),
+              ),
+            ),
+            InkWell(
+              borderRadius: BorderRadius.circular(999),
+              onTap: () => _handleFeedback('down'),
+              child: Padding(
+                padding: const EdgeInsets.all(6),
+                child: Icon(
+                  widget.feedbackRating == 'down' ? Icons.thumb_down_rounded : Icons.thumb_down_outlined,
+                  size: 14,
+                  color: widget.feedbackRating == 'down' ? JeonColors.danger : JeonColors.inkFaint,
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
