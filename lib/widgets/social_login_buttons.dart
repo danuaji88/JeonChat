@@ -526,31 +526,40 @@ class _SocialLoginButtonsState extends State<SocialLoginButtons> {
               BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 8, offset: const Offset(0, 2)),
             ],
           ),
-          child: Center(
-            child: loading
-                ? Row(
+          child: loading
+              ? Center(
+                  child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: fg)),
                       const SizedBox(width: 10),
                       Text('Sebentar...', style: TextStyle(color: fg, fontSize: 13.5, fontWeight: FontWeight.w600)),
                     ],
-                  )
-                : Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      leading,
-                      const SizedBox(width: 10),
-                      Flexible(
+                  ),
+                )
+              // Ikon dikunci di jarak tetap dari kiri (Positioned), teks
+              // dipusatkan di LEBAR PENUH tombol (bukan ikon+teks dipusatkan
+              // sebagai satu grup) — supaya posisi ikon konsisten di semua
+              // tombol sosial walau panjang labelnya beda-beda, sama seperti
+              // tombol Google asli (logo kiri tetap, teks di tengah).
+              : Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Positioned(left: 16, top: 0, bottom: 0, child: Center(child: leading)),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 44),
+                      child: Center(
                         child: Text(
                           label,
+                          textAlign: TextAlign.center,
+                          maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(color: fg, fontSize: 13.5, fontWeight: FontWeight.w600),
                         ),
                       ),
-                    ],
-                  ),
-          ),
+                    ),
+                  ],
+                ),
         ),
       ),
     );
