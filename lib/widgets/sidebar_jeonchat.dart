@@ -204,7 +204,7 @@ class _JeonChatSidebarState extends State<JeonChatSidebar> {
           _navItem(Icons.extension_outlined, 'Plugins', onTap: widget.onOpenPlugins, locked: !widget.api.isLoggedIn),
           _navItem(Icons.image_outlined, 'Buat Gambar', onTap: widget.onGenerateImage, locked: !widget.api.isLoggedIn),
           _navItem(Icons.movie_outlined, 'Buat Video', onTap: widget.onGenerateVideo, locked: !widget.api.isLoggedIn),
-          _navItem(Icons.more_horiz, 'More', onTap: widget.onOpenMore, locked: !widget.api.isLoggedIn),
+          _navItem(Icons.more_horiz_rounded, 'More', onTap: widget.onOpenMore, locked: !widget.api.isLoggedIn),
           if (widget.installedPlugins.isNotEmpty) ...[
             const SizedBox(height: 6),
             _myPluginsSection(),
