@@ -217,7 +217,7 @@ class _ChatBubbleState extends State<ChatBubble> {
         children: [
           Container(
         constraints: const BoxConstraints(maxWidth: 520),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+        padding: EdgeInsets.symmetric(horizontal: 14, vertical: isUser ? 11 : 13),
         decoration: BoxDecoration(
           color: isUser
               ? JeonColors.accent.withValues(alpha: 0.22)
@@ -231,16 +231,30 @@ class _ChatBubbleState extends State<ChatBubble> {
                     ? _analysisGreen.withValues(alpha: 0.4)
                     : JeonColors.borderSoft,
           ),
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(JeonRadius.bubble),
-            topRight: const Radius.circular(JeonRadius.bubble),
-            bottomLeft: Radius.circular(isUser ? JeonRadius.bubble : 4),
-            bottomRight: Radius.circular(isUser ? 4 : JeonRadius.bubble),
-          ),
+          borderRadius: isUser
+              ? const BorderRadius.only(
+                  topLeft: Radius.circular(JeonRadius.bubble),
+                  topRight: Radius.circular(JeonRadius.bubble),
+                  bottomLeft: Radius.circular(JeonRadius.bubble),
+                  bottomRight: Radius.circular(4),
+                )
+              : const BorderRadius.all(Radius.circular(JeonRadius.bubble)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (!isUser)
+              const Padding(
+                padding: EdgeInsets.only(bottom: 5),
+                child: Text(
+                  'JEON Chat',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: JeonColors.inkMuted,
+                  ),
+                ),
+              ),
             if (message.docSource != null) _docSourceBadge(message.docSource!),
             if (media != null)
               media.isVideo ? _videoUrlPlaceholder(media.url) : _markdownImagePreview(context, media.url),
