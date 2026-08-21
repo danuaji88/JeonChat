@@ -406,36 +406,19 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
     }
   }
 
-  /// "Upload Dokumen" — baca isi file sebagai teks UTF-8 lalu kirim ke
-  /// parent buat di-upload via uploadDoc() (RAG).
-  Future<void> _uploadDocument() async {
+  /// "Upload Dokumen / File" — lampiran nyata (bebas tipe file), lewat
+  /// jalur upload/attach yang sama dengan Upload Gambar/Video (preview di
+  /// atas input bar, lalu terkirim bareng pesan berikutnya).
+  Future<void> _pickDocumentAttachment() async {
+    if (_attachmentBusy) return;
     try {
       final result = await FilePicker.platform.pickFiles(type: FileType.any, withData: true);
       if (result == null || result.files.isEmpty) return;
-      final file = result.files.first;
-      final bytes = file.bytes;
-      if (bytes == null) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Tidak bisa membaca isi file ini')),
-        );
-        return;
-      }
-      String text;
-      try {
-        text = utf8.decode(bytes);
-      } catch (_) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('File bukan teks (bukan UTF-8) — tidak bisa dibaca sebagai dokumen')),
-        );
-        return;
-      }
-      widget.onUploadDoc(file.name, text);
+      await _uploadPlatformFile(result.files.first);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Gagal upload dokumen: $e')),
+        SnackBar(content: Text('Gagal memilih dokumen: $e')),
       );
     }
   }
@@ -458,17 +441,13 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
     }
   }
 
-  /// "Upload Video" — filter ke ekstensi video umum, lampiran nyata
-  /// (mengunggah lewat jalur upload/attach yang sama dengan Upload Gambar,
-  /// bukan teks RAG seperti "Upload Dokumen" lama).
+  /// "Upload Video (Semua Format)" — FileType.video (bawaan file_picker,
+  /// tidak dibatasi whitelist ekstensi), lampiran nyata lewat jalur
+  /// upload/attach yang sama dengan Upload Gambar.
   Future<void> _pickVideoAttachment() async {
     if (_attachmentBusy) return;
     try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: const ['mp4', 'mov', 'avi', 'mkv', 'webm'],
-        withData: true,
-      );
+      final result = await FilePicker.platform.pickFiles(type: FileType.video, withData: true);
       if (result == null || result.files.isEmpty) return;
       await _uploadPlatformFile(result.files.first);
     } catch (e) {
@@ -703,21 +682,21 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
               decoration: BoxDecoration(color: JeonColors.surface3, borderRadius: BorderRadius.circular(2)),
             ),
             const SizedBox(height: 6),
-            _plusMenuTile(Icons.upload_file_outlined, 'Upload Dokumen', onTap: () {
+            _plusMenuTile(Icons.video_library, 'Upload Video (Semua Format)', onTap: () {
               Navigator.of(sheetContext).pop();
-              _uploadDocument();
+              _pickVideoAttachment();
+            }),
+            _plusMenuTile(Icons.photo_library, 'Upload Foto & Gambar', onTap: () {
+              Navigator.of(sheetContext).pop();
+              _pickImageAttachment();
+            }),
+            _plusMenuTile(Icons.insert_drive_file, 'Upload Dokumen / File', onTap: () {
+              Navigator.of(sheetContext).pop();
+              _pickDocumentAttachment();
             }),
             _plusMenuTile(Icons.image_search_rounded, 'Analisis Gambar', onTap: () {
               Navigator.of(sheetContext).pop();
               _pickAndAnalyzeImage();
-            }),
-            _plusMenuTile(Icons.add_photo_alternate_outlined, 'Upload Gambar', onTap: () {
-              Navigator.of(sheetContext).pop();
-              _pickImageAttachment();
-            }),
-            _plusMenuTile(Icons.video_file_outlined, 'Upload Video', onTap: () {
-              Navigator.of(sheetContext).pop();
-              _pickVideoAttachment();
             }),
             _plusMenuTile(Icons.folder_open_outlined, 'Tambah dari Library', onTap: () {
               Navigator.of(sheetContext).pop();
