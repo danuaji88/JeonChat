@@ -84,6 +84,11 @@ class JeonChatInputBar extends StatefulWidget {
   /// (satu sumber kebenaran untuk preview+kirim, tidak duplikat UI).
   final ValueListenable<Map<String, dynamic>?>? externalAttachment;
 
+  /// Kanal "Coba Skill" (Plugins Store) — chat_screen.dart dorong prompt
+  /// contoh ke sini, langsung diisikan ke _controller (kolom chat), bukan
+  /// otomatis terkirim. Pola sama dengan [externalAttachment] di atas.
+  final ValueListenable<String?>? externalPromptText;
+
   /// "Code Interpreter" di menu "+" — parent yang push route-nya, biar bisa
   /// lewat auth gate dulu kayak Library/Plugins.
   final VoidCallback? onOpenCodeInterpreter;
@@ -122,6 +127,7 @@ class JeonChatInputBar extends StatefulWidget {
     required this.onUploadAttachment,
     required this.onFetchLibrary,
     this.externalAttachment,
+    this.externalPromptText,
     required this.onSpeechToText,
     this.activePluginCount = 0,
     this.onOpenPlugins,
@@ -180,6 +186,20 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
     // Paste gambar (Ctrl+V) — no-op di non-web (lihat clipboard_paste_stub.dart).
     listenForImagePaste((name, bytes) => _uploadBytesAndAttach(name, bytes));
     widget.externalAttachment?.addListener(_onExternalAttachment);
+    widget.externalPromptText?.addListener(_onExternalPromptText);
+  }
+
+  /// "Coba Skill" dari Plugins Store (lihat widget.externalPromptText) —
+  /// prompt contoh diisikan ke kolom chat, TIDAK otomatis terkirim, supaya
+  /// user masih bisa review/edit dulu sebelum kirim.
+  void _onExternalPromptText() {
+    final text = widget.externalPromptText?.value;
+    if (text == null || text.isEmpty) return;
+    setState(() {
+      _controller.text = text;
+      _controller.selection = TextSelection.collapsed(offset: _controller.text.length);
+    });
+    _textFocusNode.requestFocus();
   }
 
   /// Drag & drop dari chat_screen.dart (lihat widget.externalAttachment) —
@@ -253,6 +273,7 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
   void dispose() {
     stopListeningForImagePaste();
     widget.externalAttachment?.removeListener(_onExternalAttachment);
+    widget.externalPromptText?.removeListener(_onExternalPromptText);
     _controller.dispose();
     _textFocusNode.dispose();
     _speech.stop();

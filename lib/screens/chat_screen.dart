@@ -67,6 +67,11 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
   final ValueNotifier<Map<String, dynamic>?> _externalAttachment = ValueNotifier(null);
   bool _dragHovering = false;
 
+  // ---- "Coba Skill" (Plugins Store) — prompt contoh didorong ke
+  // input_bar.dart lewat notifier ini (lihat JeonChatInputBar.
+  // externalPromptText), pola sama dengan _externalAttachment di atas. ----
+  final ValueNotifier<String?> _externalPromptText = ValueNotifier(null);
+
   // ---- Sidebar JeonChat + multi-conversation ----
   String? _conversationId;
   List<Map<String, dynamic>> _conversations = [];
@@ -788,6 +793,15 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
 
   void _closePluginsStore() => setState(() => _showPluginsStore = false);
 
+  /// Tombol "Coba Skill" di Plugins Store — tutup store, kembali ke chat,
+  /// lalu masukkan prompt contoh ke kolom chat (bukan langsung terkirim,
+  /// biar user masih bisa review/edit dulu) lewat _externalPromptText, yang
+  /// didengarkan input_bar.dart (JeonChatInputBar.externalPromptText).
+  void _trySkillPrompt(String prompt) {
+    _closePluginsStore();
+    _externalPromptText.value = prompt;
+  }
+
   Future<void> _renameConversation(String id, String title) async {
     await ChatHistoryService.renameConversation(id, title);
     final list = await ChatHistoryService.listConversations();
@@ -866,6 +880,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
   void dispose() {
     _scrollController.dispose();
     _externalAttachment.dispose();
+    _externalPromptText.dispose();
     _notificationTimer?.cancel();
     super.dispose();
   }
@@ -2180,6 +2195,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
             isGenerating: _isGenerating,
             onStop: _stopGeneration,
             externalAttachment: _externalAttachment,
+            externalPromptText: _externalPromptText,
             onGenerateImage: (p) => _requireAccount(() => _generateImageDirect(p)),
             onSearchWeb: _searchWeb,
             onDeepResearch: (t) => _requireAuth(() => _deepResearch(t)),
@@ -2239,6 +2255,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
           installedIds: _installedPlugins.map((p) => p.id).toSet(),
           onTogglePlugin: _togglePlugin,
           onBack: _closePluginsStore,
+          onTrySkill: _trySkillPrompt,
         ),
       ),
     );

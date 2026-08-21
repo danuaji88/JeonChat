@@ -15,7 +15,22 @@ class PluginItem {
   final String description;
   final String id;
 
-  const PluginItem({required this.emoji, required this.title, required this.description, this.id = ''});
+  /// Prompt contoh untuk tombol "Coba Skill" — dimasukkan langsung ke kolom
+  /// chat (lihat onTrySkill), bukan otomatis terkirim, supaya user masih
+  /// bisa review/edit dulu. Kosong = pakai fallback generik dari title.
+  final String examplePrompt;
+
+  const PluginItem({
+    required this.emoji,
+    required this.title,
+    required this.description,
+    this.id = '',
+    this.examplePrompt = '',
+  });
+
+  /// Prompt yang benar-benar dipakai tombol "Coba Skill" — [examplePrompt]
+  /// kalau diisi, atau fallback generik dari title+description.
+  String get promptOrFallback => examplePrompt.isNotEmpty ? examplePrompt : 'Coba $title: $description';
 }
 
 /// Isi Plugin Store ala ChatGPT — dipakai SEBAGAI KONTEN AREA CHAT (bukan
@@ -29,11 +44,18 @@ class PluginsStoreView extends StatefulWidget {
   final ValueChanged<PluginItem> onTogglePlugin;
   final VoidCallback onBack;
 
+  /// Tombol "Coba Skill" di tiap kartu — dipanggil dengan prompt contoh
+  /// (lihat PluginItem.promptOrFallback), parent (chat_screen.dart) yang
+  /// masukkan ke kolom chat & kembali ke layar chat. Null = tombol
+  /// disembunyikan.
+  final ValueChanged<String>? onTrySkill;
+
   const PluginsStoreView({
     super.key,
     required this.installedIds,
     required this.onTogglePlugin,
     required this.onBack,
+    this.onTrySkill,
   });
 
   @override
@@ -51,18 +73,90 @@ class _PluginsStoreViewState extends State<PluginsStoreView> {
   static const _customSkillsKey = 'jeon_custom_skills';
 
   static const _featured = <PluginItem>[
-    PluginItem(id: 'video_editor', emoji: '🎬', title: 'Video Editor', description: 'Cut, merge, filter, caption, subtitle'),
-    PluginItem(id: 'ai_clipper', emoji: '✂️', title: 'AI Clipper', description: 'Potong video jadi klip viral otomatis'),
-    PluginItem(id: 'image_generator', emoji: '🖼️', title: 'Image Generator', description: 'Gambar gratis & berbayar (Flux, Gemini, Novita)'),
-    PluginItem(id: 'video_generator', emoji: '🎥', title: 'Video Generator', description: 'Veo 3.1, Hailuo, Kie Veo3'),
-    PluginItem(id: 'tts', emoji: '🔊', title: 'TTS Voice-over', description: 'Edge gratis, ElevenLabs natural'),
-    PluginItem(id: 'sound_effects', emoji: '🎵', title: 'Sound Effects', description: '15.992 file SFX'),
-    PluginItem(id: 'photo_filter', emoji: '📸', title: 'Filter Foto', description: 'Natural skin bright, blue sky, LUT 3D'),
-    PluginItem(id: 'report', emoji: '📊', title: 'Laporan', description: 'HTML, Word, Excel, PPT, PDF'),
-    PluginItem(id: 'video_analysis', emoji: '🎥', title: 'Analisis Video', description: 'Teknis, visual, isi, kualitas 0-100'),
-    PluginItem(id: 'hashtag_generator', emoji: '#️⃣', title: 'Hashtag Generator', description: 'Viral hashtags per platform'),
-    PluginItem(id: 'thumbnail', emoji: '🖼️', title: 'Thumbnail', description: 'YouTube thumbnail intelligence'),
-    PluginItem(id: 'broll', emoji: '🎬', title: 'B-Roll', description: 'Footage pendukung otomatis'),
+    PluginItem(
+      id: 'video_editor',
+      emoji: '🎬',
+      title: 'Video Editor',
+      description: 'Cut, merge, filter, caption, subtitle',
+      examplePrompt: 'Potongkan video ini jadi 3 klip pendek dengan subtitle otomatis',
+    ),
+    PluginItem(
+      id: 'ai_clipper',
+      emoji: '✂️',
+      title: 'AI Clipper',
+      description: 'Potong video jadi klip viral otomatis',
+      examplePrompt: 'Potong video ini jadi klip viral berdurasi 30 detik',
+    ),
+    PluginItem(
+      id: 'image_generator',
+      emoji: '🖼️',
+      title: 'Image Generator',
+      description: 'Gambar gratis & berbayar (Flux, Gemini, Novita)',
+      examplePrompt: 'Buatkan gambar kucing oren lucu gaya kartun',
+    ),
+    PluginItem(
+      id: 'video_generator',
+      emoji: '🎥',
+      title: 'Video Generator',
+      description: 'Veo 3.1, Hailuo, Kie Veo3',
+      examplePrompt: 'Buatkan video pendek pemandangan pantai saat matahari terbenam',
+    ),
+    PluginItem(
+      id: 'tts',
+      emoji: '🔊',
+      title: 'TTS Voice-over',
+      description: 'Edge gratis, ElevenLabs natural',
+      examplePrompt: 'Bacakan teks ini jadi suara: Selamat datang di JeonChat',
+    ),
+    PluginItem(
+      id: 'sound_effects',
+      emoji: '🎵',
+      title: 'Sound Effects',
+      description: '15.992 file SFX',
+      examplePrompt: 'Carikan sound effect suara hujan untuk video vlog',
+    ),
+    PluginItem(
+      id: 'photo_filter',
+      emoji: '📸',
+      title: 'Filter Foto',
+      description: 'Natural skin bright, blue sky, LUT 3D',
+      examplePrompt: 'Terapkan filter natural skin bright ke foto ini',
+    ),
+    PluginItem(
+      id: 'report',
+      emoji: '📊',
+      title: 'Laporan',
+      description: 'HTML, Word, Excel, PPT, PDF',
+      examplePrompt: 'Buatkan laporan penjualan bulan ini dalam format PDF',
+    ),
+    PluginItem(
+      id: 'video_analysis',
+      emoji: '🎥',
+      title: 'Analisis Video',
+      description: 'Teknis, visual, isi, kualitas 0-100',
+      examplePrompt: 'Analisis kualitas video ini secara teknis dan visual',
+    ),
+    PluginItem(
+      id: 'hashtag_generator',
+      emoji: '#️⃣',
+      title: 'Hashtag Generator',
+      description: 'Viral hashtags per platform',
+      examplePrompt: 'Buatkan hashtag viral untuk video TikTok tentang kuliner',
+    ),
+    PluginItem(
+      id: 'thumbnail',
+      emoji: '🖼️',
+      title: 'Thumbnail',
+      description: 'YouTube thumbnail intelligence',
+      examplePrompt: 'Buatkan thumbnail YouTube yang menarik untuk video ini',
+    ),
+    PluginItem(
+      id: 'broll',
+      emoji: '🎬',
+      title: 'B-Roll',
+      description: 'Footage pendukung otomatis',
+      examplePrompt: 'Carikan footage b-roll suasana kota malam hari',
+    ),
   ];
 
   static const _productivity = <PluginItem>[
@@ -538,37 +632,93 @@ class _PluginsStoreViewState extends State<PluginsStoreView> {
   }
 
   Widget _toolTile(PluginItem item, bool installed, VoidCallback? onToggle) => Container(
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(color: _pillBg, borderRadius: BorderRadius.circular(10)),
-        child: Row(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(color: _pillBg, borderRadius: BorderRadius.circular(12)),
+        child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(color: _borderColor, borderRadius: BorderRadius.circular(8)),
-              alignment: Alignment.center,
-              child: Text(item.emoji, style: const TextStyle(fontSize: 15)),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(color: _borderColor, borderRadius: BorderRadius.circular(8)),
+                  alignment: Alignment.center,
+                  child: Text(item.emoji, style: const TextStyle(fontSize: 15)),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(item.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: _ink)),
+                      const SizedBox(height: 2),
+                      Text(item.description,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 11, color: _inkMuted)),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _installButton(installed, onToggle),
+              ],
             ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
+            if (installed || widget.onTrySkill != null) ...[
+              const SizedBox(height: 10),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(item.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: _ink)),
-                  const SizedBox(height: 2),
-                  Text(item.description,
-                      maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, color: _inkMuted)),
+                  installed ? _activeStatusChip() : const SizedBox.shrink(),
+                  if (widget.onTrySkill != null) _trySkillButton(item),
                 ],
               ),
-            ),
-            const SizedBox(width: 8),
-            _installButton(installed, onToggle),
+            ],
           ],
+        ),
+      );
+
+  /// Status "Aktif & Otomatis" — dot hijau + label, cuma tampil untuk
+  /// plugin/skill yang sudah installed.
+  Widget _activeStatusChip() => const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 7,
+            height: 7,
+            child: DecoratedBox(decoration: BoxDecoration(shape: BoxShape.circle, color: _installedGreen)),
+          ),
+          SizedBox(width: 5),
+          Text('Aktif & Otomatis',
+              style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: _installedGreen)),
+        ],
+      );
+
+  /// "Coba Skill" — masukkan prompt contoh ke kolom chat lewat
+  /// [PluginsStoreView.onTrySkill] (parent yang urus injeksi ke input bar).
+  Widget _trySkillButton(PluginItem item) => InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: () => widget.onTrySkill?.call(item.promptOrFallback),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: _borderColor),
+          ),
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.play_arrow_rounded, size: 13, color: _ink),
+              SizedBox(width: 3),
+              Text('Coba Skill', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: _ink)),
+            ],
+          ),
         ),
       );
 

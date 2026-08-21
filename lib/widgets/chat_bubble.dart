@@ -14,6 +14,12 @@ const _thinkingPlaceholder = 'JeonAI Sedang Berpikir Lalu Eksekusi Mohon Ditungg
 const _analysisGreen = Color(0xFF2ECC71);
 const _feedbackUpGreen = Color(0xFF2EA043);
 
+/// Label mentah yang disisipkan backend saat sebuah skill otonom (Skill &
+/// Plugin Orchestrator) ikut menyusun balasan ini — dideteksi lalu
+/// dilucuti dari teks yang ditampilkan, diganti badge visual (lihat
+/// _autonomousSkillBadge).
+const _autonomousSkillMarker = '[SKILL OTOMATIS TERDETEKSI]';
+
 class ChatBubble extends StatefulWidget {
   final ChatMessage message;
 
@@ -173,6 +179,13 @@ class _ChatBubbleState extends State<ChatBubble> {
       cleanText = message.text.replaceAll(_markdownImageRegex, '').trim();
       cleanText = cleanText.replaceAll(_directImageUrlRegex, '').trim();
     }
+    // Skill & Plugin Orchestrator — backend menyisipkan label mentah ini
+    // kalau balasan disusun lewat skill otonom; dilucuti dari teks, diganti
+    // badge visual di atas bubble (lihat _autonomousSkillBadge).
+    final hasAutonomousSkill = !isUser && cleanText.contains(_autonomousSkillMarker);
+    if (hasAutonomousSkill) {
+      cleanText = cleanText.replaceAll(_autonomousSkillMarker, '').trim();
+    }
 
     final avatar = Container(
       width: 28,
@@ -243,6 +256,11 @@ class _ChatBubbleState extends State<ChatBubble> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (hasAutonomousSkill)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: _autonomousSkillBadge(),
+              ),
             if (!isUser)
               const Padding(
                 padding: EdgeInsets.only(bottom: 5),
@@ -508,6 +526,28 @@ class _ChatBubbleState extends State<ChatBubble> {
           ),
           child: Text('Dari dokumen: $docName',
               style: const TextStyle(fontSize: 10.5, color: JeonColors.accent, fontWeight: FontWeight.w600)),
+        ),
+      );
+
+  /// Balasan disusun lewat Skill & Plugin Orchestrator (backend sisipkan
+  /// [_autonomousSkillMarker]) — badge hijau/biru neon khas JEON, robot icon.
+  Widget _autonomousSkillBadge() => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [_analysisGreen.withValues(alpha: 0.22), JeonColors.accent.withValues(alpha: 0.22)],
+          ),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: _analysisGreen.withValues(alpha: 0.4)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.smart_toy_rounded, size: 12, color: _analysisGreen),
+            const SizedBox(width: 4),
+            Text('Autonomous Skill Active',
+                style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: _analysisGreen.withValues(alpha: 0.95))),
+          ],
         ),
       );
 
