@@ -20,6 +20,16 @@ class LoginScreen extends StatefulWidget {
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
+/// Radius kontrol form login (input & tombol) — disamakan dengan radius
+/// tombol sosial (_socialButton di social_login_buttons.dart, hardcoded 12)
+/// supaya seragam simetris; JeonRadius.card (10) & .pill (24) sengaja tidak
+/// dipakai di sini karena beda dari radius tombol Google/sosial di bawahnya.
+const _kLoginControlRadius = 12.0;
+
+/// Tinggi seragam untuk field & tombol utama, sama dengan tinggi tombol
+/// sosial (46) supaya rata simetris.
+const _kLoginControlHeight = 46.0;
+
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
@@ -181,14 +191,14 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 26),
                   SizedBox(
-                    height: 46,
+                    height: _kLoginControlHeight,
                     child: ElevatedButton(
                       onPressed: _loading ? null : _submit,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: JeonColors.accent,
                         foregroundColor: const Color(0xFF04150A),
                         elevation: 0,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(JeonRadius.pill)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(_kLoginControlRadius)),
                       ),
                       child: _loading
                           ? const SizedBox(
@@ -201,13 +211,13 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 12),
                   SizedBox(
-                    height: 46,
+                    height: _kLoginControlHeight,
                     child: OutlinedButton(
                       onPressed: _loading ? null : _continueAsGuest,
                       style: OutlinedButton.styleFrom(
                         foregroundColor: JeonColors.inkMuted,
                         side: const BorderSide(color: JeonColors.border),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(JeonRadius.pill)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(_kLoginControlRadius)),
                       ),
                       child: const Text('Coba Gratis', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
                     ),
@@ -249,6 +259,12 @@ class _LoginScreenState extends State<LoginScreen> {
     String? Function(String?)? validator,
     void Function(String)? onSubmitted,
   }) {
+    // Catatan: TextFormField TIDAK bisa dipaksa expands:true di sini —
+    // obscureText (field password) mewajibkan maxLines == 1, yang bentrok
+    // langsung dengan expands (butuh maxLines: null). contentPadding
+    // vertical:13 di bawah ini sudah menghasilkan tinggi ~46 secara natural,
+    // cukup dekat dengan _kLoginControlHeight tombol tanpa perlu SizedBox
+    // paksa yang justru crash untuk field password.
     return TextFormField(
       controller: controller,
       obscureText: obscureText,
@@ -265,19 +281,19 @@ class _LoginScreenState extends State<LoginScreen> {
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
         suffixIcon: suffix,
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(JeonRadius.card),
+          borderRadius: BorderRadius.circular(_kLoginControlRadius),
           borderSide: const BorderSide(color: JeonColors.border),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(JeonRadius.card),
+          borderRadius: BorderRadius.circular(_kLoginControlRadius),
           borderSide: const BorderSide(color: JeonColors.border),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(JeonRadius.card),
+          borderRadius: BorderRadius.circular(_kLoginControlRadius),
           borderSide: const BorderSide(color: JeonColors.accent),
         ),
         errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(JeonRadius.card),
+          borderRadius: BorderRadius.circular(_kLoginControlRadius),
           borderSide: const BorderSide(color: JeonColors.danger),
         ),
       ),
