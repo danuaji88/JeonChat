@@ -35,6 +35,15 @@ class ChatBubble extends StatefulWidget {
   /// pertanyaan sebelumnya. Null = tombol regenerate disembunyikan.
   final void Function(ChatMessage message)? onRegenerateAiMessage;
 
+  /// Tombol "Buka Panel" di kartu artifact (fase 3.1) — buka ArtifactPanel
+  /// TANPA auto-run. Null = kartu artifact tidak dirender sama sekali.
+  final void Function(Artifact artifact)? onOpenArtifact;
+
+  /// Tombol "▶ Jalankan" di kartu artifact (khusus type=code) — buka
+  /// ArtifactPanel & langsung eksekusi. Null = tombol Jalankan disembunyikan
+  /// (kartu tetap tampil kalau [onOpenArtifact] tersedia).
+  final void Function(Artifact artifact)? onRunArtifact;
+
   const ChatBubble({
     super.key,
     required this.message,
@@ -42,6 +51,8 @@ class ChatBubble extends StatefulWidget {
     this.onEditImage,
     this.onEditUserMessage,
     this.onRegenerateAiMessage,
+    this.onOpenArtifact,
+    this.onRunArtifact,
   });
 
   @override
@@ -220,6 +231,8 @@ class _ChatBubbleState extends State<ChatBubble> {
                   selectAll: true,
                 ),
               ),
+            if (message.artifacts.isNotEmpty && widget.onOpenArtifact != null)
+              ...message.artifacts.map(_artifactCard),
             if (message.toolCall != null) ToolCardWidget(toolCall: message.toolCall!),
             if (message.imageUrl != null) _imagePreview(context, message.imageUrl!),
             if (message.audioUrl != null) AudioMessagePlayer(url: message.audioUrl!),
@@ -577,6 +590,85 @@ class _ChatBubbleState extends State<ChatBubble> {
   Widget _videoCard(String url) {
     return VideoMessagePlayer(url: url);
   }
+
+  /// Kartu artifact (fase 3.1, kode/dokumen panjang) — isi lengkapnya cuma
+  /// dibuka lewat ArtifactPanel (widget.onOpenArtifact), bukan ditampilkan
+  /// mentah di bubble (raw ``` fence sudah dibuang di chat_screen.dart).
+  Widget _artifactCard(Artifact artifact) {
+    final isCode = artifact.type == 'code';
+    final lineCount = artifact.content.isEmpty ? 0 : '\n'.allMatches(artifact.content).length + 1;
+    final title = artifact.title.trim().isNotEmpty ? artifact.title.trim() : (isCode ? 'Kode' : 'Dokumen');
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: JeonColors.surface3,
+        border: Border.all(color: JeonColors.borderSoft),
+        borderRadius: BorderRadius.circular(JeonRadius.card),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(color: JeonColors.accentGlow, borderRadius: BorderRadius.circular(8)),
+            alignment: Alignment.center,
+            child: isCode
+                ? const Icon(Icons.code, size: 18, color: JeonColors.accent)
+                : const Text('📄', style: TextStyle(fontSize: 16)),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: JeonColors.ink)),
+                const SizedBox(height: 2),
+                Text(
+                  [
+                    if (artifact.languageLabel.isNotEmpty) artifact.languageLabel,
+                    '$lineCount baris',
+                  ].join(' • '),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 11, color: JeonColors.inkFaint),
+                ),
+                const SizedBox(height: 9),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    if (isCode && widget.onRunArtifact != null)
+                      _artifactButton('▶ Jalankan', onTap: () => widget.onRunArtifact!(artifact)),
+                    _artifactButton('Buka Panel', onTap: () => widget.onOpenArtifact!(artifact)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _artifactButton(String label, {required VoidCallback onTap}) => InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: JeonColors.accent.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Text(label,
+              style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: JeonColors.accent)),
+        ),
+      );
 
   Widget _fileCard(String path) {
     final name = path.contains('/') ? path.substring(path.lastIndexOf('/') + 1) : path;

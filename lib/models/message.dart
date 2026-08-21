@@ -31,6 +31,60 @@ class ToolCall {
       );
 }
 
+/// Kode/dokumen panjang terdeteksi backend di sebuah balasan /chat (fase
+/// 3.1, lihat has_artifact/artifacts di ApiService.sendChat) — dirender
+/// sebagai kartu ringkas di chat_bubble.dart, isi lengkapnya dibuka lewat
+/// ArtifactPanel (lihat artifact_panel.dart).
+class Artifact {
+  final String type; // 'code' | 'document'
+  final String language;
+  final String languageLabel;
+  final String title;
+  final String content;
+  final int start;
+  final int end;
+
+  const Artifact({
+    required this.type,
+    this.language = '',
+    this.languageLabel = '',
+    this.title = '',
+    required this.content,
+    this.start = 0,
+    this.end = 0,
+  });
+
+  factory Artifact.fromApiJson(Map<String, dynamic> json) => Artifact(
+        type: (json['type'] ?? 'code').toString(),
+        language: (json['language'] ?? '').toString(),
+        languageLabel: (json['language_label'] ?? '').toString(),
+        title: (json['title'] ?? '').toString(),
+        content: (json['content'] ?? '').toString(),
+        start: json['start'] as int? ?? 0,
+        end: json['end'] as int? ?? 0,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'type': type,
+        'language': language,
+        'languageLabel': languageLabel,
+        'title': title,
+        'content': content,
+        'start': start,
+        'end': end,
+      };
+
+  factory Artifact.fromJson(Map<String, dynamic> json) => Artifact(
+        type: (json['type'] ?? 'code').toString(),
+        language: (json['language'] ?? '').toString(),
+        languageLabel: (json['languageLabel'] ?? '').toString(),
+        title: (json['title'] ?? '').toString(),
+        content: (json['content'] ?? '').toString(),
+        start: json['start'] as int? ?? 0,
+        end: json['end'] as int? ?? 0,
+      );
+}
+
 class ChatMessage {
   final bool isUser;
   final String text;
@@ -77,6 +131,11 @@ class ChatMessage {
   /// dirender sebagai banner hijau khusus di chat_bubble.dart kalau tidak null.
   final String? autoLearnSkill;
 
+  /// Artifact (kode/dokumen panjang) terdeteksi backend pada balasan ini
+  /// (fase 3.1) — dirender sebagai kartu di bawah teks, isi lengkap dibuka
+  /// lewat ArtifactPanel. Kosong = balasan biasa, tidak berubah.
+  final List<Artifact> artifacts;
+
   const ChatMessage({
     required this.isUser,
     required this.text,
@@ -95,6 +154,7 @@ class ChatMessage {
     this.docSource,
     this.pluginsUsed = const [],
     this.autoLearnSkill,
+    this.artifacts = const [],
   });
 
   /// Shape expected by the JEON backend: {role, content}.
@@ -122,6 +182,7 @@ class ChatMessage {
         if (docSource != null) 'docSource': docSource,
         if (pluginsUsed.isNotEmpty) 'pluginsUsed': pluginsUsed,
         if (autoLearnSkill != null) 'autoLearnSkill': autoLearnSkill,
+        if (artifacts.isNotEmpty) 'artifacts': artifacts.map((a) => a.toJson()).toList(),
       };
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) => ChatMessage(
@@ -147,5 +208,10 @@ class ChatMessage {
         docSource: json['docSource'] as String?,
         pluginsUsed: (json['pluginsUsed'] as List?)?.map((e) => e.toString()).toList() ?? const [],
         autoLearnSkill: json['autoLearnSkill'] as String?,
+        artifacts: (json['artifacts'] as List?)
+                ?.whereType<Map<String, dynamic>>()
+                .map(Artifact.fromJson)
+                .toList() ??
+            const [],
       );
 }

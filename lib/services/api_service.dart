@@ -609,7 +609,7 @@ class ApiService {
 
   /// [cancelToken] — lihat [CancelToken], dipakai fitur "Stop Generation" di
   /// chat_screen.dart untuk menggugurkan request ini kalau user tap Stop.
-  Future<String> sendChat({
+  Future<ChatResult> sendChat({
     required List<ChatMessage> history,
     required String model,
     String? sessionId,
@@ -650,9 +650,19 @@ class ApiService {
     }
     final data = jsonDecode(res.body);
     if (data is Map<String, dynamic>) {
-      return (data['content'] ?? data['reply'] ?? data['response'] ?? '').toString();
+      final content = (data['content'] ?? data['reply'] ?? data['response'] ?? '').toString();
+      return ChatResult(content: content, artifacts: _parseArtifacts(data['artifacts']));
     }
-    return data.toString();
+    return ChatResult(content: data.toString());
+  }
+
+  /// Fase 3.1 — kode/dokumen panjang terdeteksi backend (lihat has_artifact/
+  /// artifacts di respons /chat). Dipakai juga secara spekulatif untuk
+  /// /agent di bawah (belum dikonfirmasi task ada di sana, tapi field JSON
+  /// tambahan aman diabaikan backend kalau memang tidak dikenal).
+  List<Artifact> _parseArtifacts(dynamic raw) {
+    if (raw is! List) return const [];
+    return raw.whereType<Map>().map((e) => Artifact.fromApiJson(Map<String, dynamic>.from(e))).toList();
   }
 
   /// Level 3: Hermes Agent penuh (semua tools & skills).
@@ -726,6 +736,7 @@ class ApiService {
         fileUrls: fileUrls,
         model: data['model']?.toString(),
         pluginsUsed: pluginsUsed,
+        artifacts: _parseArtifacts(data['artifacts']),
       );
     } on AgentTimeoutException {
       // Sync timeout → fallback ke async submit+poll
@@ -804,6 +815,7 @@ class ApiService {
           fileUrls: fileUrls,
           model: pollData['model']?.toString(),
           pluginsUsed: pluginsUsed,
+          artifacts: _parseArtifacts(pollData['artifacts']),
         );
       }
       if (status == 'error') {
@@ -908,13 +920,23 @@ class AgentResult {
   final List<String> fileUrls;
   final String? model;
   final List<String> pluginsUsed;
+  final List<Artifact> artifacts;
   AgentResult({
     required this.content,
     this.agentSession,
     this.fileUrls = const [],
     this.model,
     this.pluginsUsed = const [],
+    this.artifacts = const [],
   });
+}
+
+/// Hasil sendChat() (fase 3.1) — dulunya cuma String, sekarang membawa
+/// [artifacts] juga (kode/dokumen panjang terdeteksi backend).
+class ChatResult {
+  final String content;
+  final List<Artifact> artifacts;
+  ChatResult({required this.content, this.artifacts = const []});
 }
 
 /// Token pembatal untuk sendChat()/sendAgentPrompt() (Fitur "Stop Generation")

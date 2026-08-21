@@ -21,6 +21,7 @@ import 'register_screen.dart';
 import 'skill_list_screen.dart';
 import 'skills_screen.dart';
 import 'voice_studio_screen.dart';
+import '../widgets/artifact_panel.dart';
 import '../widgets/chat_bubble.dart';
 import '../widgets/input_bar.dart';
 import '../widgets/sidebar_jeonchat.dart';
@@ -65,6 +66,40 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
   List<Map<String, dynamic>> _conversations = [];
   bool? _sidebarOpenOverride; // null = pakai default responsif (terbuka di web/desktop)
   double _messagesOpacity = 1.0; // fade 150ms saat pindah conversation
+
+  // ---- ArtifactPanel (fase 3.1) — cuma dipakai untuk split-view desktop
+  // (lebar > 900px, lihat build()); di layar sempit _openArtifact() push
+  // route modal sendiri jadi field ini tidak pernah keisi di sana. ----
+  static const _artifactPanelBreakpoint = 900.0;
+  Artifact? _activeArtifact;
+  bool _activeArtifactAutoRun = false;
+
+  void _openArtifact(Artifact artifact, {bool autoRun = false}) {
+    final wide = MediaQuery.of(context).size.width > _artifactPanelBreakpoint;
+    if (wide) {
+      setState(() {
+        _activeArtifact = artifact;
+        _activeArtifactAutoRun = autoRun;
+      });
+      return;
+    }
+    Navigator.of(context).push(MaterialPageRoute(
+      fullscreenDialog: true,
+      builder: (routeContext) => Scaffold(
+        backgroundColor: JeonColors.bg,
+        body: SafeArea(
+          child: ArtifactPanel(
+            api: widget.api,
+            artifact: artifact,
+            autoRun: autoRun,
+            onClose: () => Navigator.of(routeContext).pop(),
+          ),
+        ),
+      ),
+    ));
+  }
+
+  void _closeArtifact() => setState(() => _activeArtifact = null);
 
   // ---- Projects ----
   List<Map<String, dynamic>> _projects = [];
@@ -139,6 +174,25 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
   static final _autoLearnRegex =
       RegExp(r"🧠\s*\[AutoLearn\]\s*Skill baru disimpan:\s*['“‘\x22]([^'”’\x22]+)['”’\x22]");
 
+  /// Fase 3.1 — buang blok ``` fence artifact dari teks bubble (isi lengkap
+  /// tampil di ArtifactPanel, bukan di bubble). [start]/[end] dari backend
+  /// dipakai untuk memotong, TAPI divalidasi dulu lewat pencocokan isi —
+  /// kalau tidak cocok (mis. offset backend beda basis hitung dari indexing
+  /// String Dart), fence itu dibiarkan apa adanya daripada berisiko memotong
+  /// teks yang salah.
+  String _stripArtifactFences(String content, List<Artifact> artifacts) {
+    if (artifacts.isEmpty) return content;
+    var result = content;
+    final sorted = [...artifacts]..sort((a, b) => b.start.compareTo(a.start));
+    for (final a in sorted) {
+      if (a.start < 0 || a.end > result.length || a.end <= a.start) continue;
+      final slice = result.substring(a.start, a.end);
+      if (a.content.trim().isNotEmpty && !slice.contains(a.content.trim())) continue;
+      result = result.replaceRange(a.start, a.end, '');
+    }
+    return result.replaceAll(RegExp(r'\n{3,}'), '\n\n').trim();
+  }
+
   ({String text, String? autoLearnSkill}) _extractAutoLearn(String content) {
     final match = _autoLearnRegex.firstMatch(content);
     if (match == null) return (text: content, autoLearnSkill: null);
@@ -146,13 +200,19 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     return (text: cleanText, autoLearnSkill: match.group(1));
   }
 
-  ChatMessage _buildAgentMessage(String rawContent, {List<String> pluginsUsed = const []}) {
-    final parsed = _extractAutoLearn(rawContent);
+  ChatMessage _buildAgentMessage(String rawContent,
+      {List<String> pluginsUsed = const [], List<Artifact> artifacts = const []}) {
+    final parsed = _extractAutoLearn(_stripArtifactFences(rawContent, artifacts));
     final content = parsed.text;
     final autoLearnSkill = parsed.autoLearnSkill;
     final match = _tmpFilePathRegex.firstMatch(content);
     if (match == null) {
-      return ChatMessage(isUser: false, text: content, pluginsUsed: pluginsUsed, autoLearnSkill: autoLearnSkill);
+      return ChatMessage(
+          isUser: false,
+          text: content,
+          pluginsUsed: pluginsUsed,
+          autoLearnSkill: autoLearnSkill,
+          artifacts: artifacts);
     }
     final path = match.group(0)!;
     final dot = path.lastIndexOf('.');
@@ -160,14 +220,29 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     final mediaUrl = '${widget.api.baseUrl}$path';
     if (_imageExtensions.contains(ext)) {
       return ChatMessage(
-          isUser: false, text: content, imageUrl: mediaUrl, pluginsUsed: pluginsUsed, autoLearnSkill: autoLearnSkill);
+          isUser: false,
+          text: content,
+          imageUrl: mediaUrl,
+          pluginsUsed: pluginsUsed,
+          autoLearnSkill: autoLearnSkill,
+          artifacts: artifacts);
     }
     if (_audioExtensions.contains(ext)) {
       return ChatMessage(
-          isUser: false, text: content, audioUrl: mediaUrl, pluginsUsed: pluginsUsed, autoLearnSkill: autoLearnSkill);
+          isUser: false,
+          text: content,
+          audioUrl: mediaUrl,
+          pluginsUsed: pluginsUsed,
+          autoLearnSkill: autoLearnSkill,
+          artifacts: artifacts);
     }
     return ChatMessage(
-        isUser: false, text: content, filePath: path, pluginsUsed: pluginsUsed, autoLearnSkill: autoLearnSkill);
+        isUser: false,
+        text: content,
+        filePath: path,
+        pluginsUsed: pluginsUsed,
+        autoLearnSkill: autoLearnSkill,
+        artifacts: artifacts);
   }
 
   late List<ChatMessage> _messages = [];
@@ -551,6 +626,9 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       // di atas; karena _saveHistory() digated selama _incognito true, tidak
       // ada yang perlu dibersihkan dari storage (memang tidak pernah ditulis).
       _incognito = false;
+      // ArtifactPanel (fase 3.1) juga direset — artifact dari percakapan lama
+      // tidak relevan lagi begitu pindah/mulai percakapan baru.
+      _activeArtifact = null;
     });
     _fadeInMessages();
   }
@@ -567,6 +645,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       _messages = _messagesFromConversation(conv);
       _agentSession = conv['agentSession'] as String?;
       _incognito = false;
+      _activeArtifact = null;
       _messagesOpacity = 0.0;
       _showPluginsStore = false;
       _activeDocName = null;
@@ -963,10 +1042,20 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       _activeCancelToken = cancelToken;
     });
     try {
-      final reply =
-          await widget.api.sendChat(history: _cleanHistory(), model: _lastModel, cancelToken: cancelToken, incognito: _incognito, projectId: _activeConversationProject?['id'] as String?);
-      final parsed = _extractAutoLearn(reply);
-      _resolveTyping(typing, ChatMessage(isUser: false, text: parsed.text, autoLearnSkill: parsed.autoLearnSkill));
+      final result = await widget.api.sendChat(
+          history: _cleanHistory(),
+          model: _lastModel,
+          cancelToken: cancelToken,
+          incognito: _incognito,
+          projectId: _activeConversationProject?['id'] as String?);
+      final parsed = _extractAutoLearn(_stripArtifactFences(result.content, result.artifacts));
+      _resolveTyping(
+          typing,
+          ChatMessage(
+              isUser: false,
+              text: parsed.text,
+              autoLearnSkill: parsed.autoLearnSkill,
+              artifacts: result.artifacts));
     } on RequestCancelledException {
       _resolveTyping(typing, const ChatMessage(isUser: false, text: 'Dihentikan.'));
     } catch (e) {
@@ -983,8 +1072,13 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       _activeCancelToken = cancelToken;
     });
     try {
-      final reply = await widget.api.sendChat(history: _cleanHistory(), model: model, cancelToken: cancelToken, incognito: _incognito, projectId: _activeConversationProject?['id'] as String?);
-      _resolveTyping(typing, ChatMessage(isUser: false, text: reply));
+      final result = await widget.api.sendChat(
+          history: _cleanHistory(),
+          model: model,
+          cancelToken: cancelToken,
+          incognito: _incognito,
+          projectId: _activeConversationProject?['id'] as String?);
+      _resolveTyping(typing, ChatMessage(isUser: false, text: _stripArtifactFences(result.content, result.artifacts), artifacts: result.artifacts));
     } on RequestCancelledException {
       _resolveTyping(typing, const ChatMessage(isUser: false, text: 'Dihentikan.'));
     } catch (e) {
@@ -1089,7 +1183,8 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       if (result.agentSession != null) {
         _agentSession = result.agentSession;
       }
-      _resolveTyping(typing, _buildAgentMessage(result.content, pluginsUsed: result.pluginsUsed));
+      _resolveTyping(
+          typing, _buildAgentMessage(result.content, pluginsUsed: result.pluginsUsed, artifacts: result.artifacts));
       _saveHistory();
       _loadQuota();
     } on RequestCancelledException {
@@ -1101,9 +1196,20 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     } on AgentTimeoutException {
       // Agent timeout — auto-fallback ke /chat
       try {
-        final reply = await widget.api.sendChat(history: _cleanHistory(), model: model, cancelToken: cancelToken, incognito: _incognito, projectId: _activeConversationProject?['id'] as String?);
-        final parsed = _extractAutoLearn(reply);
-        _resolveTyping(typing, ChatMessage(isUser: false, text: parsed.text, autoLearnSkill: parsed.autoLearnSkill));
+        final result = await widget.api.sendChat(
+            history: _cleanHistory(),
+            model: model,
+            cancelToken: cancelToken,
+            incognito: _incognito,
+            projectId: _activeConversationProject?['id'] as String?);
+        final parsed = _extractAutoLearn(_stripArtifactFences(result.content, result.artifacts));
+        _resolveTyping(
+            typing,
+            ChatMessage(
+                isUser: false,
+                text: parsed.text,
+                autoLearnSkill: parsed.autoLearnSkill,
+                artifacts: result.artifacts));
         _saveHistory();
         _loadQuota();
       } on RequestCancelledException {
@@ -1116,9 +1222,20 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     } catch (e) {
       // Fallback ke /chat kalau /agent gagal
       try {
-        final reply = await widget.api.sendChat(history: _cleanHistory(), model: model, cancelToken: cancelToken, incognito: _incognito, projectId: _activeConversationProject?['id'] as String?);
-        final parsed = _extractAutoLearn(reply);
-        _resolveTyping(typing, ChatMessage(isUser: false, text: parsed.text, autoLearnSkill: parsed.autoLearnSkill));
+        final result = await widget.api.sendChat(
+            history: _cleanHistory(),
+            model: model,
+            cancelToken: cancelToken,
+            incognito: _incognito,
+            projectId: _activeConversationProject?['id'] as String?);
+        final parsed = _extractAutoLearn(_stripArtifactFences(result.content, result.artifacts));
+        _resolveTyping(
+            typing,
+            ChatMessage(
+                isUser: false,
+                text: parsed.text,
+                autoLearnSkill: parsed.autoLearnSkill,
+                artifacts: result.artifacts));
         _saveHistory();
         _loadQuota();
       } on RequestCancelledException {
@@ -1603,6 +1720,8 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
                                   onEditImage: _openImageEditor,
                                   onEditUserMessage: _editUserMessage,
                                   onRegenerateAiMessage: _regenerateMessage,
+                                  onOpenArtifact: (a) => _openArtifact(a),
+                                  onRunArtifact: (a) => _openArtifact(a, autoRun: true),
                                 ),
                           ),
                   ),
@@ -1727,12 +1846,37 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
 
     if (!isWide) return mainContent;
 
+    // Split-view ArtifactPanel (fase 3.1) — cuma di layar lebar (> 900px);
+    // di antara 600-900px (sidebar tampil tapi belum cukup lebar buat panel
+    // inline), _openArtifact() sudah otomatis pakai modal push, jadi
+    // _activeArtifact tidak pernah keisi di rentang itu.
+    final artifact = _activeArtifact;
+    final showArtifactPanel = artifact != null && MediaQuery.of(context).size.width > _artifactPanelBreakpoint;
+    final contentWithArtifact = showArtifactPanel
+        ? Row(
+            children: [
+              Expanded(flex: 55, child: mainContent),
+              Container(width: 1, color: JeonColors.border),
+              Expanded(
+                flex: 45,
+                child: ArtifactPanel(
+                  key: ValueKey(artifact),
+                  api: widget.api,
+                  artifact: artifact,
+                  autoRun: _activeArtifactAutoRun,
+                  onClose: _closeArtifact,
+                ),
+              ),
+            ],
+          )
+        : mainContent;
+
     return Scaffold(
       backgroundColor: Colors.black,
       body: Row(
         children: [
           if (sidebarOpen) SizedBox(width: 260, child: SafeArea(child: sidebar)),
-          Expanded(child: mainContent),
+          Expanded(child: contentWithArtifact),
         ],
       ),
     );
