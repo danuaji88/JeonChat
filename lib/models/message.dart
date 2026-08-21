@@ -163,11 +163,24 @@ class ChatMessage {
     this.artifacts = const [],
   });
 
-  /// Shape expected by the JEON backend: {role, content}.
-  Map<String, dynamic> toApiJson() => {
-        'role': isUser ? 'user' : 'assistant',
-        'content': text,
-      };
+  /// Shape expected by the JEON backend: {role, content}. Kalau pesan ini
+  /// punya lampiran (imageUrl/attachmentUrl dari Upload Gambar/Video/File di
+  /// menu "+"), URL-nya disisipkan juga sebagai teks di content (jaring
+  /// pengaman — sama seperti catatan [Lampiran: ...] di _send() chat_screen.
+  /// dart) SEKALIGUS sebagai field JSON terpisah, supaya konteks lampiran
+  /// tidak hilang saat pesan ini ikut terkirim lewat riwayat /chat (mis.
+  /// regenerate, cek biaya, atau fallback dari /agent yang timeout/gagal).
+  Map<String, dynamic> toApiJson() {
+    final url = imageUrl ?? attachmentUrl;
+    final hasAttachment = url != null && url.isNotEmpty;
+    return {
+      'role': isUser ? 'user' : 'assistant',
+      'content': hasAttachment ? '$text\n[Lampiran: ${attachmentName ?? 'file'} - $url]' : text,
+      if (imageUrl != null && imageUrl!.isNotEmpty) 'image_url': imageUrl,
+      if (attachmentUrl != null && attachmentUrl!.isNotEmpty) 'attachment_url': attachmentUrl,
+      if (attachmentName != null && attachmentName!.isNotEmpty) 'attachment_name': attachmentName,
+    };
+  }
 
   /// Local persistence shape — round-trips through ChatHistoryService.
   Map<String, dynamic> toJson() => {

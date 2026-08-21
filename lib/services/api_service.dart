@@ -11,6 +11,11 @@ import '../models/message.dart';
 ///   GET  /models
 ///   POST /chat   body: {messages: [{role, content}], model, session_id} → {content, ...}
 ///   POST /agent  body: {prompt, session_id?} → {content, agent_session, ...}
+/// (messages: [{role, content}] JUGA disisipkan ke body /agent di atas —
+/// jaring pengaman biar konteks riwayat penuh tidak cuma bergantung pada
+/// session_id sisi server, sama seperti image_url/attachment_url/
+/// project_id, kontraknya belum dikonfirmasi tapi aman kalau backend
+/// mengabaikan field yang tidak dikenal.)
 /// Note: there is no working /chat/history endpoint on this backend (confirmed
 /// 404) — conversation lists are managed locally via ChatHistoryService.
 class ApiService {
@@ -688,6 +693,12 @@ class ApiService {
   /// eksplisit dari task, dan URL-nya JUGA disisipkan sebagai teks di
   /// [prompt] (lihat pemanggil di chat_screen.dart) sebagai jaring pengaman
   /// kalau field JSON ini ternyata tidak diparse backend.
+  /// [history] — riwayat percakapan aktif (dibersihkan dari placeholder
+  /// "sedang berpikir"/pesan error, lihat _cleanHistory() di chat_screen.
+  /// dart), disisipkan sebagai field 'messages' di body — jaring pengaman
+  /// supaya AI tidak lupa konteks kalau session_id sisi server ternyata
+  /// tidak persisten, TANPA mengganti 'prompt' (kontrak /agent yang sudah
+  /// terverifikasi tetap dikirim apa adanya).
   /// [cancelToken] — lihat [CancelToken], dipakai fitur "Stop Generation".
   Future<AgentResult> sendAgentPrompt({
     required String prompt,
@@ -698,6 +709,7 @@ class ApiService {
     String? attachmentUrl,
     CancelToken? cancelToken,
     String? projectId,
+    List<ChatMessage>? history,
   }) async {
     if (!isConfigured) {
       throw ApiException('Base URL belum diatur. Buka Settings untuk isi URL backend.');
@@ -723,6 +735,7 @@ class ApiService {
         // (pola sama seperti image_url/attachment_url di atas), TIDAK
         // dijamin backend /agent benar-benar memprosesnya.
         if (projectId != null && projectId.isNotEmpty) 'project_id': projectId,
+        if (history != null && history.isNotEmpty) 'messages': history.map((m) => m.toApiJson()).toList(),
       };
       final res = await client
           .post(_uri('/agent'), headers: _headers, body: jsonEncode(body))
@@ -732,7 +745,7 @@ class ApiService {
         // Timeout sync → fallback ke async
         return await _agentSubmitPoll(prompt, model, agentSession, plugins,
             imageUrl: imageUrl, attachmentUrl: attachmentUrl, client: client, cancelToken: cancelToken,
-            projectId: projectId);
+            projectId: projectId, history: history);
       }
       if (res.statusCode != 200) {
         throw ApiException('Agent gagal (${res.statusCode}): ${res.body}');
@@ -752,7 +765,7 @@ class ApiService {
       // Sync timeout → fallback ke async submit+poll
       return await _agentSubmitPoll(prompt, model, agentSession, plugins,
           imageUrl: imageUrl, attachmentUrl: attachmentUrl, client: client, cancelToken: cancelToken,
-          projectId: projectId);
+          projectId: projectId, history: history);
     } on http.ClientException {
       if (cancelToken?.isCancelled == true) throw RequestCancelledException();
       rethrow;
@@ -767,7 +780,8 @@ class ApiService {
       String? attachmentUrl,
       required http.Client client,
       CancelToken? cancelToken,
-      String? projectId}) async {
+      String? projectId,
+      List<ChatMessage>? history}) async {
     // Submit task
     final submitBody = {
       'prompt': prompt,
@@ -777,6 +791,7 @@ class ApiService {
       if (imageUrl != null && imageUrl.isNotEmpty) 'image_url': imageUrl,
       if (attachmentUrl != null && attachmentUrl.isNotEmpty) 'attachment_url': attachmentUrl,
       if (projectId != null && projectId.isNotEmpty) 'project_id': projectId,
+      if (history != null && history.isNotEmpty) 'messages': history.map((m) => m.toApiJson()).toList(),
     };
     http.Response submitRes;
     try {

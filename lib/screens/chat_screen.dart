@@ -1379,6 +1379,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
         attachmentUrl: attachmentUrl,
         cancelToken: cancelToken,
         projectId: _activeConversationProject?['id'] as String?,
+        history: _cleanHistory(),
       );
       if (result.agentSession != null) {
         _agentSession = result.agentSession;
