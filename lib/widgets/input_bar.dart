@@ -687,79 +687,6 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
     return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
   }
 
-  /// "Cari di Web" di menu "+" — dialog input query lalu diteruskan ke
-  /// parent (webSearch(), hasil terstruktur).
-  Future<void> _showWebSearchDialog() async {
-    final controller = TextEditingController();
-    final result = await showModalBottomSheet<String>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: JeonColors.surface,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
-      builder: (sheetContext) => Padding(
-        padding: EdgeInsets.only(
-          left: 16,
-          right: 16,
-          top: 16,
-          bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 16,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text('Cari di Web', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600, color: JeonColors.ink)),
-            const SizedBox(height: 10),
-            TextField(
-              controller: controller,
-              autofocus: true,
-              maxLines: 1,
-              textInputAction: TextInputAction.search,
-              style: const TextStyle(fontSize: 13.4, color: JeonColors.ink),
-              decoration: InputDecoration(
-                hintText: 'Cari di web...',
-                hintStyle: const TextStyle(color: JeonColors.inkFaint),
-                filled: true,
-                fillColor: JeonColors.surface2,
-                isDense: true,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(JeonRadius.card),
-                  borderSide: const BorderSide(color: JeonColors.border),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(JeonRadius.card),
-                  borderSide: const BorderSide(color: JeonColors.border),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(JeonRadius.card),
-                  borderSide: const BorderSide(color: JeonColors.accent),
-                ),
-              ),
-              onSubmitted: (v) => Navigator.of(sheetContext).pop(v),
-            ),
-            const SizedBox(height: 14),
-            SizedBox(
-              height: 44,
-              child: ElevatedButton(
-                onPressed: () => Navigator.of(sheetContext).pop(controller.text.trim()),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: JeonColors.accent,
-                  foregroundColor: const Color(0xFF04150A),
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(JeonRadius.pill)),
-                ),
-                child: const Text('Cari', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-    final query = result?.trim();
-    if (query == null || query.isEmpty) return;
-    widget.onWebSearch(query);
-  }
-
   Future<void> _showPlusMenu() async {
     await showModalBottomSheet(
       context: context,
@@ -796,17 +723,9 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
               Navigator.of(sheetContext).pop();
               _openLibraryPicker();
             }),
-            _plusMenuTile(Icons.travel_explore_outlined, 'Cari di Web', onTap: () {
-              Navigator.of(sheetContext).pop();
-              _showWebSearchDialog();
-            }),
             _plusMenuTile(Icons.science_outlined, 'Riset Mendalam', onTap: () {
               Navigator.of(sheetContext).pop();
               _promptFor('Riset Mendalam', 'Topik riset apa?', widget.onDeepResearch);
-            }),
-            _plusMenuTile(Icons.code_rounded, 'Code Interpreter', onTap: () {
-              Navigator.of(sheetContext).pop();
-              widget.onOpenCodeInterpreter?.call();
             }),
             _plusMenuTile(Icons.auto_awesome_outlined, 'Skills', onTap: () {
               Navigator.of(sheetContext).pop();
