@@ -30,6 +30,7 @@ import '../widgets/chat_bubble.dart';
 import '../widgets/input_bar.dart';
 import '../widgets/share_dialog.dart';
 import '../widgets/sidebar_jeonchat.dart';
+import '../widgets/tier_selection_dialog.dart';
 import '../widgets/upgrade_dialog.dart';
 
 class JeonChatScreen extends StatefulWidget {
@@ -1266,23 +1267,35 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       if (prompt.isEmpty) prompt = text; // fallback ke teks asli
 
       if (isImg) {
-        final imageUrl = await widget.api.generateMediaImage(prompt);
-        _resolveTyping(typing, ChatMessage(
-          isUser: false,
-          text: '✅ Gambar siap! 📸\nPrompt: $prompt',
-          imageUrl: imageUrl,
-        ));
+        final tier = await showTierSelectionDialog(context);
+        if (!mounted) return;
+        if (tier == null) {
+          _resolveTyping(typing, const ChatMessage(isUser: false, text: 'Dibatalkan.'));
+        } else {
+          final imageUrl = await widget.api.generateMediaImage(prompt, tier: tier);
+          _resolveTyping(typing, ChatMessage(
+            isUser: false,
+            text: '✅ Gambar siap! 📸\nPrompt: $prompt',
+            imageUrl: imageUrl,
+          ));
+          _loadQuota();
+        }
         _saveHistory();
-        _loadQuota();
       } else if (isVid) {
-        final videoUrl = await widget.api.generateMediaVideo(prompt);
-        _resolveTyping(typing, ChatMessage(
-          isUser: false,
-          text: '✅ Video siap! 🎬\nPrompt: $prompt',
-          videoUrl: videoUrl,
-        ));
+        final tier = await showTierSelectionDialog(context);
+        if (!mounted) return;
+        if (tier == null) {
+          _resolveTyping(typing, const ChatMessage(isUser: false, text: 'Dibatalkan.'));
+        } else {
+          final videoUrl = await widget.api.generateMediaVideo(prompt, tier: tier);
+          _resolveTyping(typing, ChatMessage(
+            isUser: false,
+            text: '✅ Video siap! 🎬\nPrompt: $prompt',
+            videoUrl: videoUrl,
+          ));
+          _loadQuota();
+        }
         _saveHistory();
-        _loadQuota();
       } else if (isAudio) {
         final audioUrl = await widget.api.generateTTS(prompt, voiceId: _selectedVoiceId);
         _resolveTyping(typing, ChatMessage(
@@ -1541,6 +1554,8 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
   // ---- Aksi popover "+" JeonChatInputBar: tiap callback benar-benar panggil backend ----
 
   Future<void> _generateImageDirect(String prompt) async {
+    final tier = await showTierSelectionDialog(context);
+    if (tier == null || !mounted) return;
     final typing = ChatMessage(isUser: false, text: _thinkingText);
     setState(() {
       _messages = [..._messages, ChatMessage(isUser: true, text: 'Buat gambar: $prompt'), typing];
@@ -1548,7 +1563,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     _saveHistory();
     _scrollToBottom();
     try {
-      final url = await widget.api.generateImage(prompt);
+      final url = await widget.api.generateImage(prompt, tier: tier);
       _resolveTyping(typing, ChatMessage(isUser: false, text: '✅ Gambar siap!', imageUrl: url));
       _loadQuota();
     } catch (e) {
@@ -1577,6 +1592,8 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
   }
 
   Future<void> _generateVideoDirect(String prompt) async {
+    final tier = await showTierSelectionDialog(context);
+    if (tier == null || !mounted) return;
     final typing = ChatMessage(isUser: false, text: _thinkingText);
     setState(() {
       _messages = [..._messages, ChatMessage(isUser: true, text: 'Buat video: $prompt'), typing];
@@ -1584,7 +1601,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     _saveHistory();
     _scrollToBottom();
     try {
-      final url = await widget.api.generateVideo(prompt);
+      final url = await widget.api.generateVideo(prompt, tier: tier);
       _resolveTyping(typing, ChatMessage(isUser: false, text: '✅ Video siap!', videoUrl: url));
       _loadQuota();
     } catch (e) {

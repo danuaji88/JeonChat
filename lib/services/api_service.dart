@@ -837,11 +837,16 @@ class ApiService {
   }
 
   /// Generate image via /image endpoint (gratis: Pollinations)
-  Future<String> generateImage(String promptText, {bool allowAi = true}) async {
+  Future<String> generateImage(String promptText, {bool allowAi = true, String? tier}) async {
     if (!isConfigured) throw ApiException('Base URL belum diatur.');
     final res = await http
         .post(_uri('/image'),
-            headers: _headers, body: jsonEncode({'prompt': promptText, 'allow_ai': allowAi}))
+            headers: _headers,
+            body: jsonEncode({
+              'prompt': promptText,
+              'allow_ai': allowAi,
+              if (tier != null) 'tier': tier,
+            }))
         .timeout(const Duration(seconds: 90));
     if (res.statusCode != 200) {
       throw ApiException('Image gagal (${res.statusCode})');
@@ -851,11 +856,15 @@ class ApiService {
   }
 
   /// Media pipeline cepat — gambar via /media/image (gratis dulu: library/Openverse/Wikimedia/Pollinations)
-  Future<String> generateMediaImage(String promptText, {bool allowAi = false}) async {
+  Future<String> generateMediaImage(String promptText, {bool allowAi = false, String? tier}) async {
     if (!isConfigured) throw ApiException('Base URL belum diatur.');
     final res = await http
         .post(_uri('/media/image'), headers: _headers,
-            body: jsonEncode({'prompt': promptText, 'allow_ai': allowAi}))
+            body: jsonEncode({
+              'prompt': promptText,
+              'allow_ai': allowAi,
+              if (tier != null) 'tier': tier,
+            }))
         .timeout(const Duration(seconds: 120));
     if (res.statusCode != 200) {
       throw ApiException('Gambar gagal (${res.statusCode}): ${res.body}');
@@ -865,11 +874,15 @@ class ApiService {
   }
 
   /// Media pipeline cepat — video via /media/video (gratis dulu: library/Openverse/Wikimedia)
-  Future<String> generateMediaVideo(String promptText, {bool allowAi = false}) async {
+  Future<String> generateMediaVideo(String promptText, {bool allowAi = false, String? tier}) async {
     if (!isConfigured) throw ApiException('Base URL belum diatur.');
     final res = await http
         .post(_uri('/media/video'), headers: _headers,
-            body: jsonEncode({'prompt': promptText, 'allow_ai': allowAi}))
+            body: jsonEncode({
+              'prompt': promptText,
+              'allow_ai': allowAi,
+              if (tier != null) 'tier': tier,
+            }))
         .timeout(const Duration(seconds: 180));
     if (res.statusCode != 200) {
       throw ApiException('Video gagal (${res.statusCode}): ${res.body}');
@@ -879,10 +892,14 @@ class ApiService {
   }
 
   /// Generate video via /video endpoint.
-  Future<String> generateVideo(String promptText) async {
+  Future<String> generateVideo(String promptText, {String? tier}) async {
     if (!isConfigured) throw ApiException('Base URL belum diatur.');
     final res = await http
-        .post(_uri('/video'), headers: _headers, body: jsonEncode({'prompt': promptText}))
+        .post(_uri('/video'), headers: _headers,
+            body: jsonEncode({
+              'prompt': promptText,
+              if (tier != null) 'tier': tier,
+            }))
         .timeout(const Duration(seconds: 180));
     if (res.statusCode != 200) {
       throw ApiException('Video gagal (${res.statusCode}): ${res.body}');
