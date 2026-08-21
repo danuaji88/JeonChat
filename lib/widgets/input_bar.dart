@@ -816,7 +816,7 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
                   const _RecordingWaveform(),
                   const SizedBox(width: 8),
                   const Text('Mendengarkan...',
-                      style: TextStyle(fontSize: 12, color: JeonColors.accent, fontWeight: FontWeight.w600)),
+                      style: TextStyle(fontSize: 12, color: JeonColors.danger, fontWeight: FontWeight.w600)),
                 ],
               ),
             ),
@@ -902,7 +902,7 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
                       : Icon(
                           _recording ? Icons.mic : Icons.mic_none_rounded,
                           size: 19,
-                          color: _recording ? JeonColors.accent : JeonColors.inkFaint,
+                          color: _recording ? JeonColors.danger : JeonColors.inkFaint,
                         ),
                   tooltip: _recording ? 'Berhenti rekam' : 'Dikte suara (rekam)',
                   onPressed: _sttLoading ? null : _toggleMic,
@@ -1118,7 +1118,7 @@ class _RecordingWaveformState extends State<_RecordingWaveform> with TickerProvi
             margin: const EdgeInsets.symmetric(horizontal: 1.5),
             width: 3,
             height: 6 + _controllers[i].value * 10,
-            decoration: BoxDecoration(color: JeonColors.accent, borderRadius: BorderRadius.circular(2)),
+            decoration: BoxDecoration(color: JeonColors.danger, borderRadius: BorderRadius.circular(2)),
           ),
         );
       }),
