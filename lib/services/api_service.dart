@@ -295,15 +295,11 @@ class ApiService {
 
   bool get isConfigured => baseUrl.isNotEmpty;
 
-  // Sama dengan system prompt versi Telegram — dikirim sebagai pesan
-  // pertama (role "system") di setiap request /chat, sebelum riwayat user.
-  static const _systemPrompt = "Kamu adalah JEON Chat, asisten AI untuk owner JEON (M Joko Lukito). "
-      "Panggil owner 'Appa Jeon'. "
-      "Kamu punya tools: video editor, AI clipper, image generator, TTS, sound effects, "
-      "filter foto/video, laporan multi-format, dan 103 skill. "
-      "Jawab dalam bahasa Indonesia, gaya natural, bantu end-to-end. "
-      "Kalau diminta buat video/gambar/suara, bilang kamu bisa bantu via tools JEON. "
-      "Tidak perlu bilang 'aku tidak bisa' — bilang 'aku bisa bantu lewat tools JEON'.";
+  // System prompt TIDAK dikirim dari frontend — backend (/chat, /agent)
+  // yang menyuntikkan system prompt yang benar per-user (owner vs guest)
+  // via _inject_system_prompt. Frontend cukup kirim riwayat pesan user saja.
+  // (Fix 2026-08-21: prompt statis "Panggil owner 'Appa Jeon'" sebelumnya
+  // membuat SEMUA user — termasuk akun free — dipanggil Appa Jeon.)
 
   Future<List<String>> getModels() async {
     if (!isConfigured) throw ApiException('Base URL belum diatur di Settings.');
@@ -638,7 +634,6 @@ class ApiService {
     if (cancelToken?.isCancelled == true) throw RequestCancelledException();
     final body = {
       'messages': [
-        {'role': 'system', 'content': _systemPrompt},
         ...history.map((m) => m.toApiJson()),
       ],
       'model': model,
