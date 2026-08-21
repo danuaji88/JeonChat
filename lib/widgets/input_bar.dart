@@ -458,17 +458,15 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
     }
   }
 
-  /// "Upload File/Dokumen" — filter ke jenis dokumen umum (biar tidak
-  /// tumpang tindih dengan "Upload Gambar" di atas), lampiran nyata
-  /// (bukan teks RAG seperti "Upload Dokumen" lama).
-  Future<void> _pickDocumentAttachment() async {
+  /// "Upload Video" — filter ke ekstensi video umum, lampiran nyata
+  /// (mengunggah lewat jalur upload/attach yang sama dengan Upload Gambar,
+  /// bukan teks RAG seperti "Upload Dokumen" lama).
+  Future<void> _pickVideoAttachment() async {
     if (_attachmentBusy) return;
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
-        allowedExtensions: const [
-          'pdf', 'doc', 'docx', 'txt', 'csv', 'xlsx', 'xls', 'ppt', 'pptx', 'rtf', 'md', 'json',
-        ],
+        allowedExtensions: const ['mp4', 'mov', 'avi', 'mkv', 'webm'],
         withData: true,
       );
       if (result == null || result.files.isEmpty) return;
@@ -476,7 +474,7 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Gagal memilih dokumen: $e')),
+        SnackBar(content: Text('Gagal memilih video: $e')),
       );
     }
   }
@@ -790,25 +788,13 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
               Navigator.of(sheetContext).pop();
               _pickImageAttachment();
             }),
-            _plusMenuTile(Icons.attach_file_rounded, 'Upload File/Dokumen', onTap: () {
+            _plusMenuTile(Icons.video_file_outlined, 'Upload Video', onTap: () {
               Navigator.of(sheetContext).pop();
-              _pickDocumentAttachment();
+              _pickVideoAttachment();
             }),
             _plusMenuTile(Icons.folder_open_outlined, 'Tambah dari Library', onTap: () {
               Navigator.of(sheetContext).pop();
               _openLibraryPicker();
-            }),
-            _plusMenuTile(Icons.image_outlined, 'Buat Gambar', onTap: () {
-              Navigator.of(sheetContext).pop();
-              _promptFor('Buat Gambar', 'Gambar apa yang mau dibuat?', widget.onGenerateImage);
-            }),
-            _plusMenuTile(Icons.movie_creation_outlined, 'Buat Video', onTap: () {
-              Navigator.of(sheetContext).pop();
-              _promptFor('Buat Video', 'Video apa yang mau dibuat?', widget.onGenerateVideo);
-            }),
-            _plusMenuTile(Icons.graphic_eq_rounded, 'Buat Suara', onTap: () {
-              Navigator.of(sheetContext).pop();
-              _promptFor('Buat Suara', 'Teks yang mau dibacakan?', widget.onGenerateAudio);
             }),
             _plusMenuTile(Icons.travel_explore_outlined, 'Cari di Web', onTap: () {
               Navigator.of(sheetContext).pop();
