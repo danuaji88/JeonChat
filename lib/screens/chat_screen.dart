@@ -707,6 +707,9 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
   }
 
   Future<void> _newChat({String? projectId}) async {
+    // Simpan dulu percakapan yang sedang aktif (kalau ada) supaya riwayatnya
+    // tidak hilang — termasuk metadata cabang (fase 4.3).
+    await _saveHistory();
     final id = await ChatHistoryService.createConversation(projectId: projectId ?? _activeProjectId);
     final list = await ChatHistoryService.listConversations();
     if (!mounted) return;
@@ -1168,6 +1171,52 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     }
     await _saveHistory();
     _scrollToBottom();
+  }
+
+  /// Fase 4.3 — Branching: buat percakapan cabang baru dari bubble AI
+  /// [aiMessage]. Riwayat sampai pesan itu (termasuk pesan itu) disalin ke
+  /// percakapan baru via ChatHistoryService.createBranch, lalu langsung
+  /// pindah ke cabang — siap lanjut dengan arah berbeda.
+  Future<void> _branchFromMessage(ChatMessage aiMessage) async {
+    final sourceId = _conversationId;
+    if (sourceId == null || _isGenerating) return;
+    final idx = _messages.indexWhere((m) => identical(m, aiMessage));
+    if (idx < 0) return;
+    // Jangan buat cabang dari placeholder "berpikir" (kalau-kalau callback
+    // sempat dipicu saat request masih jalan).
+    if (aiMessage.text == _thinkingText) return;
+
+    await _saveHistory();
+    final branchId = await ChatHistoryService.createBranch(
+      sourceId: sourceId,
+      messageIndex: idx,
+    );
+    if (!mounted) return;
+    final conv = await ChatHistoryService.loadConversation(branchId);
+    if (!mounted || conv == null) return;
+    final list = await ChatHistoryService.listConversations();
+    if (!mounted) return;
+    setState(() {
+      _conversationId = branchId;
+      _conversations = list;
+      _messages = _messagesFromConversation(conv);
+      _agentSession = conv['agentSession'] as String?;
+      _incognito = false;
+      _activeArtifact = null;
+      _feedbackRatings.clear();
+      _messagesOpacity = 0.0;
+      _showPluginsStore = false;
+      _activeDocName = null;
+    });
+    _fadeInMessages();
+    _scrollToBottom();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('🌿 Cabang dibuat — riwayat sampai pesan ini disalin'),
+        duration: Duration(seconds: 2),
+      ),
+    );
   }
 
   Future<void> _handleCostRequest(String model, ChatMessage typing) async {
@@ -1917,6 +1966,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
                                   onRunArtifact: (a) => _openArtifact(a, autoRun: true),
                                   feedbackRating: _feedbackRatings[_messageId(i)],
                                   onFeedback: _handleFeedback,
+                                  onBranchMessage: _branchFromMessage,
                                 ),
                           ),
                   ),

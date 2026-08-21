@@ -57,6 +57,11 @@ class ChatBubble extends StatefulWidget {
   /// Null = tombol thumbs disembunyikan.
   final void Function(ChatMessage message, String? rating)? onFeedback;
 
+  /// Branching (fase 4.3) — buat percabangan percakapan mulai dari bubble AI
+  /// ini (copy riwayat sampai pesan ini ke percakapan baru). Null = tombol
+  /// 🌿 disembunyikan.
+  final void Function(ChatMessage message)? onBranchMessage;
+
   const ChatBubble({
     super.key,
     required this.message,
@@ -68,6 +73,7 @@ class ChatBubble extends StatefulWidget {
     this.onRunArtifact,
     this.feedbackRating,
     this.onFeedback,
+    this.onBranchMessage,
   });
 
   @override
@@ -394,6 +400,19 @@ class _ChatBubbleState extends State<ChatBubble> {
               child: const Padding(
                 padding: EdgeInsets.all(6),
                 child: Icon(Icons.refresh_rounded, size: 14, color: JeonColors.inkFaint),
+              ),
+            ),
+          if (widget.onBranchMessage != null)
+            InkWell(
+              borderRadius: BorderRadius.circular(999),
+              onTap: () => widget.onBranchMessage!(widget.message),
+              child: Padding(
+                padding: const EdgeInsets.all(6),
+                child: Icon(
+                  Icons.account_tree_outlined,
+                  size: 14,
+                  color: JeonColors.inkFaint,
+                ),
               ),
             ),
           if (widget.onFeedback != null) ...[

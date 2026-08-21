@@ -246,6 +246,11 @@ class ChatHistoryService {
       'updatedAt': now,
       'agentSession': agentSession ?? existing?['agentSession'],
       'projectId': existing?['projectId'],
+      // Fase 4.3 — metadata cabang WAJIB dipertahankan saat cabang
+      // di-save ulang (pesan baru di cabang tidak boleh mengubah statusnya
+      // jadi percakapan normal).
+      'branchOf': existing?['branchOf'],
+      'branchFromMessageIndex': existing?['branchFromMessageIndex'],
     };
     if (idx != -1) {
       list[idx] = updated;
@@ -300,6 +305,57 @@ class ChatHistoryService {
     list.removeWhere((c) => c['id'] == id);
     await _writeConversations(prefs, list);
     await pushToServer();
+  }
+
+  /// Fase 4.3 — Branching: buat percakapan cabang baru dari percakapan
+  /// [sourceId], berisi salinan pesan sampai index [messageIndex] (termasuk
+  /// pesan itu). Cabang dipakai untuk \"lanjutkan dari titik ini dengan arah
+  /// berbeda\" — judulnya = judul induk + \" · Cabang N\", dan ditandai
+  /// [branchOf] = sourceId supaya sidebar bisa menampilkan badge & tombol
+  /// hapus bisa kembali ke induk. Mengembalikan id cabang baru.
+  static Future<String> createBranch({
+    required String sourceId,
+    required int messageIndex,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = await _readConversations(prefs);
+    final source = list.firstWhere((c) => c['id'] == sourceId, orElse: () => {});
+    if (source.isEmpty) return sourceId;
+
+    final rawMessages = source['messages'];
+    final messages = rawMessages is List
+        ? rawMessages.whereType<Map<String, dynamic>>().toList()
+        : <Map<String, dynamic>>[];
+    final clamped = messageIndex.clamp(0, messages.isEmpty ? 0 : messages.length - 1);
+    final sliced = messages.sublist(0, clamped + 1);
+
+    // Hitung nomor cabang: berapa cabang yang sudah ada dari induk ini.
+    final branchCount =
+        list.where((c) => c['branchOf'] == sourceId).length + 1;
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final id = '${now}_${list.length}_br';
+    final baseTitle = (source['title'] as String?)?.isNotEmpty == true
+        ? (source['title'] as String)
+        : 'Percakapan Baru';
+    list.insert(0, {
+      'id': id,
+      'title': '$baseTitle · Cabang $branchCount',
+      'titleAuto': false,
+      'messages': sliced,
+      'pinned': false,
+      'archived': false,
+      'createdAt': now,
+      'updatedAt': now,
+      'agentSession': source['agentSession'],
+      'projectId': source['projectId'],
+      // Metadata cabang (fase 4.3) — dipakai sidebar & chat_screen.
+      'branchOf': sourceId,
+      'branchFromMessageIndex': clamped,
+    });
+    await _writeConversations(prefs, list);
+    await pushToServer();
+    return id;
   }
 
   /// Rename manual dari menu ⋯ → Rename — mematikan auto-title seterusnya

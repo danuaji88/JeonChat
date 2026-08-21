@@ -4,6 +4,7 @@ import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import '../services/api_service.dart';
 import '../services/plugin_service.dart';
 import '../services/profile_service.dart';
+import '../theme.dart';
 import 'notification_badge.dart';
 import 'profile_menu_sheet.dart';
 
@@ -1022,8 +1023,21 @@ class _JeonChatSidebarState extends State<JeonChatSidebar> {
               Icon(pinned ? Icons.push_pin : Icons.chat_bubble_outline, size: 14, color: _inkMuted),
               const SizedBox(width: 9),
               Expanded(
-                child: Text(title,
-                    maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13, color: _ink)),
+                child: Row(
+                  children: [
+                    // Badge cabang (fase 4.3) — percakapan yang dibuat via
+                    // "Buat Cabang" ditandai ikon pohon kecil agar beda dari
+                    // percakapan biasa di sidebar.
+                    if (conv['branchOf'] != null) ...[
+                      const Icon(Icons.account_tree_outlined, size: 12, color: JeonColors.accent),
+                      const SizedBox(width: 4),
+                    ],
+                    Flexible(
+                      child: Text(title,
+                          maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13, color: _ink)),
+                    ),
+                  ],
+                ),
               ),
               InkWell(
                 borderRadius: BorderRadius.circular(6),
