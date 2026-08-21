@@ -1004,6 +1004,27 @@ class ApiService {
       });
 
   Future<void> deleteFeedback(String id) => _post('/feedback', {'action': 'delete', 'id': id});
+
+  // ---- Share/Export Percakapan (fase 4.2) via /share — action create/list/
+  // revoke/export_md/export_html. [revokeShare]'s [shareId] dikirim lewat
+  // key JSON "conv_id" juga (bukan cuma untuk conv_id conversation) — kontrak
+  // backend generik pakai field itu sebagai "id target" apa pun actionnya. ----
+
+  Future<Map<String, dynamic>> createShare(String convId) =>
+      _post('/share', {'action': 'create', 'conv_id': convId});
+
+  Future<List<Map<String, dynamic>>> listShares() async {
+    final res = await _post('/share', {'action': 'list'});
+    final raw = res['shares'] as List?;
+    return raw?.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList() ?? [];
+  }
+
+  Future<void> revokeShare(String shareId) => _post('/share', {'action': 'revoke', 'conv_id': shareId});
+
+  Future<String> exportConversation(String convId, String format) async {
+    final res = await _post('/share', {'action': format, 'conv_id': convId});
+    return (res['content'] ?? '').toString();
+  }
 }
 
 /// Satu opsi di dropdown model input bar — dari GET /models 'options' atau

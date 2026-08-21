@@ -27,6 +27,7 @@ import 'voice_studio_screen.dart';
 import '../widgets/artifact_panel.dart';
 import '../widgets/chat_bubble.dart';
 import '../widgets/input_bar.dart';
+import '../widgets/share_dialog.dart';
 import '../widgets/sidebar_jeonchat.dart';
 import '../widgets/upgrade_dialog.dart';
 
@@ -122,6 +123,19 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
       if (p['id'] == projectId) return p;
     }
     return null;
+  }
+
+  /// Judul percakapan aktif (fase 4.2, dipakai ShareDialog) — ChatMessage/
+  /// state screen ini tidak punya field judul sendiri, jadi dicari dari
+  /// _conversations (metadata sidebar) via _conversationId, sama polanya
+  /// dengan [_activeConversationProject]. Null kalau belum ada percakapan
+  /// aktif atau judulnya masih kosong.
+  String? get _conversationTitle {
+    final convId = _conversationId;
+    if (convId == null) return null;
+    final conv = _conversations.firstWhere((c) => c['id'] == convId, orElse: () => const {});
+    final title = (conv['title'] as String?)?.trim();
+    return (title != null && title.isNotEmpty) ? title : null;
   }
 
   // ---- Plugin Store (area chat digantikan, sidebar tetap terlihat) ----
@@ -642,6 +656,17 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Chat disimpan ke project'), duration: Duration(seconds: 1)),
+    );
+  }
+
+  /// Tombol header "Share" (fase 4.2) — buka ShareDialog untuk buat/kelola
+  /// link publik & export Markdown/HTML percakapan aktif.
+  void _openShareDialog() {
+    final id = _conversationId;
+    if (id == null) return;
+    showDialog(
+      context: context,
+      builder: (_) => ShareDialog(api: widget.api, conversationId: id, conversationTitle: _conversationTitle),
     );
   }
 
@@ -1806,6 +1831,12 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
             tooltip: 'Pilih Suara',
             onPressed: _openVoiceStudio,
           ),
+          if (_conversationId != null)
+            IconButton(
+              icon: const Icon(Icons.ios_share, size: 20, color: JeonColors.inkMuted),
+              tooltip: 'Bagikan Percakapan',
+              onPressed: _openShareDialog,
+            ),
           IconButton(
             icon: const Icon(Icons.add_comment_outlined, size: 20, color: JeonColors.inkMuted),
             tooltip: 'Chat Baru',
