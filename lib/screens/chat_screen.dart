@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:audioplayers/audioplayers.dart';
 import 'package:cross_file/cross_file.dart';
 import 'package:desktop_drop/desktop_drop.dart';
@@ -20,6 +22,7 @@ import 'project_detail_screen.dart';
 import 'register_screen.dart';
 import 'skill_list_screen.dart';
 import 'skills_screen.dart';
+import 'tasks_screen.dart';
 import 'voice_studio_screen.dart';
 import '../widgets/artifact_panel.dart';
 import '../widgets/chat_bubble.dart';
@@ -153,6 +156,13 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
   // buat badge sidebar. ----
   int _userSkillCount = 0;
 
+  // ---- Tugas Terjadwal & Notifikasi (fase 3.3) — badge lonceng di sidebar
+  // (entri "Tugas") di-poll tiap 30 detik selama app aktif, bukan sekali di
+  // initState saja, supaya tugas yang baru fired sementara app dibuka tetap
+  // kelihatan tanpa perlu reload manual. ----
+  int _unreadNotifications = 0;
+  Timer? _notificationTimer;
+
   // Deteksi kalimat "ingat ini..." / "kalau saya minta X selalu Y" — kalau
   // cocok, tawarkan simpan sebagai skill (opsional, tidak menghalangi alur
   // kirim pesan normal).
@@ -257,11 +267,27 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     if (widget.api.isLoggedIn) {
       _loadQuota();
       _loadUserSkillCount();
+      _pollNotifications();
+      _notificationTimer = Timer.periodic(const Duration(seconds: 30), (_) => _pollNotifications());
     }
     SettingsService.loadFromPrefs().then((s) {
       if (!mounted) return;
       setState(() => _selectedVoiceId = s.selectedVoiceId);
     });
+  }
+
+  /// Badge lonceng "Tugas" di sidebar (fase 3.3) — dipanggil sekali di
+  /// initState lalu tiap 30 detik lewat [_notificationTimer] selama app
+  /// aktif & user login. Gagal diam-diam (offline/endpoint belum siap) sama
+  /// seperti _loadUserSkillCount, badge cuma tidak berubah, bukan error keras.
+  Future<void> _pollNotifications() async {
+    if (!widget.api.isLoggedIn) return;
+    try {
+      final res = await widget.api.listNotifications();
+      final unread = res['unread'];
+      if (!mounted) return;
+      setState(() => _unreadNotifications = unread is num ? unread.toInt() : 0);
+    } catch (_) {}
   }
 
   Future<void> _loadUserSkillCount() async {
@@ -761,6 +787,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
   void dispose() {
     _scrollController.dispose();
     _externalAttachment.dispose();
+    _notificationTimer?.cancel();
     super.dispose();
   }
 
@@ -1589,6 +1616,13 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
         if (!isWide) Navigator.of(context).maybePop();
         _openSkills();
       },
+      onOpenTasks: () {
+        if (!isWide) Navigator.of(context).maybePop();
+        _requireAuth(() {
+          Navigator.of(context).push(MaterialPageRoute(builder: (_) => TasksScreen(api: widget.api)));
+        });
+      },
+      unreadCount: _unreadNotifications,
       installedPlugins: _installedPlugins,
       onSelectPlugin: (title) {
         if (!isWide) Navigator.of(context).maybePop();

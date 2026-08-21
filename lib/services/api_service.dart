@@ -918,6 +918,74 @@ class ApiService {
   /// {total, voices: [{voice_id, name, gender, age, descriptive, category,
   /// kelompok, preview_url, cloned_by_count}, ...]}.
   Future<Map<String, dynamic>> getVoices() => _get('/voices/api', timeout: const Duration(seconds: 30));
+
+  // ---- Tugas Terjadwal & Notifikasi (fase 3.3) via /tasks & /notifications
+  // — action get/create/update/delete/toggle & list/mark_read/mark_all_read/
+  // clear. schedule_type: once/interval/daily/weekly/cron (lihat
+  // tasks_screen.dart untuk format nilainya masing-masing). ----
+
+  Future<List<Map<String, dynamic>>> listTasks() async {
+    final res = await _post('/tasks', {'action': 'list'});
+    final raw = res['tasks'] as List?;
+    return raw?.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList() ?? [];
+  }
+
+  Future<Map<String, dynamic>> createTask({
+    required String title,
+    required String message,
+    required String scheduleType,
+    required String scheduleValue,
+  }) async {
+    final res = await _post('/tasks', {
+      'action': 'create',
+      'title': title,
+      'message': message,
+      'schedule_type': scheduleType,
+      'schedule_value': scheduleValue,
+    });
+    final task = res['task'];
+    return task is Map ? Map<String, dynamic>.from(task) : {};
+  }
+
+  Future<Map<String, dynamic>> updateTask(
+    String id, {
+    String? title,
+    String? message,
+    String? scheduleType,
+    String? scheduleValue,
+    bool? enabled,
+  }) async {
+    final res = await _post('/tasks', {
+      'action': 'update',
+      'id': id,
+      if (title != null) 'title': title,
+      if (message != null) 'message': message,
+      if (scheduleType != null) 'schedule_type': scheduleType,
+      if (scheduleValue != null) 'schedule_value': scheduleValue,
+      if (enabled != null) 'enabled': enabled,
+    });
+    final task = res['task'];
+    return task is Map ? Map<String, dynamic>.from(task) : {};
+  }
+
+  Future<void> deleteTask(String id) => _post('/tasks', {'action': 'delete', 'id': id});
+
+  Future<Map<String, dynamic>> toggleTask(String id) async {
+    final res = await _post('/tasks', {'action': 'toggle', 'id': id});
+    final task = res['task'];
+    return task is Map ? Map<String, dynamic>.from(task) : {};
+  }
+
+  /// {notifications: [...], unread: N} — [unread] dipakai badge lonceng di
+  /// sidebar (lihat _pollNotifications di chat_screen.dart).
+  Future<Map<String, dynamic>> listNotifications() => _post('/notifications', {'action': 'list'});
+
+  Future<void> markNotificationRead(String id) =>
+      _post('/notifications', {'action': 'mark_read', 'id': id});
+
+  Future<void> markAllNotificationsRead() => _post('/notifications', {'action': 'mark_all_read'});
+
+  Future<void> clearNotifications() => _post('/notifications', {'action': 'clear'});
 }
 
 /// Satu opsi di dropdown model input bar — dari GET /models 'options' atau

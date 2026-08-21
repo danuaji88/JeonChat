@@ -4,6 +4,7 @@ import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import '../services/api_service.dart';
 import '../services/plugin_service.dart';
 import '../services/profile_service.dart';
+import 'notification_badge.dart';
 import 'profile_menu_sheet.dart';
 
 /// Sidebar kiri JeonChat: header, "New chat", nav statis, mode Chat/Work,
@@ -27,6 +28,15 @@ class JeonChatSidebar extends StatefulWidget {
   final VoidCallback? onOpenPlugins;
   final VoidCallback? onOpenScheduled;
   final VoidCallback? onOpenMore;
+
+  /// Buka TasksScreen (fase 3.3, "Tugas Terjadwal"). Null = entri "Tugas"
+  /// tetap tampil tapi tap-nya no-op.
+  final VoidCallback? onOpenTasks;
+
+  /// Jumlah notifikasi belum dibaca (/notifications, di-poll tiap 30 detik
+  /// oleh chat_screen.dart lewat _pollNotifications) — badge lingkaran
+  /// merah kecil di samping entri "Tugas". 0 = badge disembunyikan.
+  final int unreadCount;
 
   // ---- My Plugins ----
   final List<InstalledPlugin> installedPlugins;
@@ -88,6 +98,8 @@ class JeonChatSidebar extends StatefulWidget {
     this.onOpenPlugins,
     this.onOpenScheduled,
     this.onOpenMore,
+    this.onOpenTasks,
+    this.unreadCount = 0,
     this.installedPlugins = const [],
     this.onSelectPlugin,
     this.onDeactivatePlugin,
@@ -170,6 +182,18 @@ class _JeonChatSidebarState extends State<JeonChatSidebar> {
           _navItem(Icons.code_rounded, 'Code', onTap: widget.onOpenScheduled, locked: !widget.api.isLoggedIn),
           _navItem(Icons.extension_outlined, 'Plugins', onTap: widget.onOpenPlugins, locked: !widget.api.isLoggedIn),
           _navItem(Icons.auto_awesome_outlined, 'Skills', onTap: widget.onOpenMore, locked: !widget.api.isLoggedIn),
+          _navItem(
+            Icons.schedule_outlined,
+            'Tugas',
+            onTap: widget.onOpenTasks,
+            locked: !widget.api.isLoggedIn,
+            trailing: widget.unreadCount > 0
+                ? Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: NotificationBadge(count: widget.unreadCount, iconSize: 15),
+                  )
+                : null,
+          ),
           if (widget.installedPlugins.isNotEmpty) ...[
             const SizedBox(height: 6),
             _myPluginsSection(),
@@ -321,7 +345,8 @@ class _JeonChatSidebarState extends State<JeonChatSidebar> {
         ),
       );
 
-  Widget _navItem(IconData icon, String label, {VoidCallback? onTap, bool locked = false}) => InkWell(
+  Widget _navItem(IconData icon, String label, {VoidCallback? onTap, bool locked = false, Widget? trailing}) =>
+      InkWell(
         onTap: onTap ?? () {},
         hoverColor: _hoverBg,
         child: Padding(
@@ -336,6 +361,7 @@ class _JeonChatSidebarState extends State<JeonChatSidebar> {
                   child: Text(label,
                       overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14, color: _ink)),
                 ),
+                if (trailing != null) trailing,
                 if (locked) const Icon(Icons.lock_outline, size: 14, color: _inkFaint),
               ],
             ),
