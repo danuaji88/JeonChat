@@ -1411,7 +1411,49 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
   // (endpoint tools-lengkap) dengan instruksi eksplisit, bukan sekadar UI.
   Future<void> _searchWeb(String query) => _send('Cari di internet: $query', 'jeon-chat');
 
-  Future<void> _deepResearch(String topic) => _send('Lakukan riset mendalam tentang: $topic', 'jeon-chat');
+  /// Tombol "Riset Mendalam" — endpoint /research (ala Perplexity):
+  /// jawaban AI + sitasi [n] + daftar sumber clickable.
+  Future<void> _deepResearch(String topic) async {
+    final typing = ChatMessage(isUser: false, text: _thinkingText);
+    setState(() {
+      _messages = [
+        ..._messages,
+        ChatMessage(isUser: true, text: '🔎 Riset: $topic'),
+        typing,
+      ];
+    });
+    _saveHistory();
+    _scrollToBottom();
+    try {
+      final result = await widget.api.research(topic);
+      final answer = (result['answer'] ?? '').toString().trim();
+      final rawSources = (result['sources'] as List?) ?? [];
+      final sources = rawSources
+          .map((s) => {
+                'title': (s['title'] ?? s['name'] ?? '').toString(),
+                'url': (s['url'] ?? s['link'] ?? '').toString(),
+                'snippet': (s['snippet'] ?? s['description'] ?? s['content'] ?? '').toString(),
+              })
+          .toList();
+      if (answer.isEmpty && sources.isEmpty) {
+        _resolveTyping(
+            typing, const ChatMessage(isUser: false, text: 'Tidak ada hasil riset untuk topik itu.'));
+      } else {
+        _resolveTyping(
+          typing,
+          ChatMessage(
+            isUser: false,
+            text: answer.isEmpty ? 'Hasil riset untuk "$topic":' : answer,
+            researchSources: sources.isNotEmpty ? sources : null,
+          ),
+        );
+      }
+    } catch (e) {
+      _resolveTyping(typing, ChatMessage(isUser: false, text: '⚠️ Riset mendalam gagal: $e'));
+    }
+    _saveHistory();
+    _scrollToBottom();
+  }
 
   /// Dipakai sidebar (nav "Skills") maupun chip "✨ Skills" di input bar.
   void _openSkills() {

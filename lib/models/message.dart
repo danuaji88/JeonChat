@@ -113,6 +113,11 @@ class ChatMessage {
   /// hasil pencarian.
   final List<Map<String, String>>? searchResults;
 
+  /// Daftar sumber riset mendalam (dari /research) — tiap item
+  /// {title, url, snippet}. Dirender sebagai kartu "Sumber [n]" di
+  /// chat_bubble.dart di bawah jawaban ber-sitasi.
+  final List<Map<String, String>>? researchSources;
+
   /// Hasil runCode() dari Code Interpreter — {code, output} atau
   /// {code, error} — dirender sebagai blok kode + output di chat_bubble.dart.
   final Map<String, String>? codeResult;
@@ -150,6 +155,7 @@ class ChatMessage {
     this.attachmentName,
     this.isAnalysis = false,
     this.searchResults,
+    this.researchSources,
     this.codeResult,
     this.docSource,
     this.pluginsUsed = const [],
@@ -178,6 +184,7 @@ class ChatMessage {
         if (attachmentName != null) 'attachmentName': attachmentName,
         if (isAnalysis) 'isAnalysis': isAnalysis,
         if (searchResults != null) 'searchResults': searchResults,
+        if (researchSources != null) 'researchSources': researchSources,
         if (codeResult != null) 'codeResult': codeResult,
         if (docSource != null) 'docSource': docSource,
         if (pluginsUsed.isNotEmpty) 'pluginsUsed': pluginsUsed,
@@ -201,6 +208,10 @@ class ChatMessage {
         attachmentName: json['attachmentName'] as String?,
         isAnalysis: json['isAnalysis'] as bool? ?? false,
         searchResults: (json['searchResults'] as List?)
+            ?.whereType<Map>()
+            .map((e) => e.map((k, v) => MapEntry(k.toString(), v.toString())))
+            .toList(),
+        researchSources: (json['researchSources'] as List?)
             ?.whereType<Map>()
             .map((e) => e.map((k, v) => MapEntry(k.toString(), v.toString())))
             .toList(),

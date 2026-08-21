@@ -242,6 +242,8 @@ class _ChatBubbleState extends State<ChatBubble> {
               _attachmentCard(message.attachmentUrl!, message.attachmentName ?? 'File'),
             if (message.searchResults != null && message.searchResults!.isNotEmpty)
               _searchResultsList(message.searchResults!),
+            if (message.researchSources != null && message.researchSources!.isNotEmpty)
+              _researchSourcesList(message.researchSources!),
             if (message.codeResult != null) _codeResultCard(message.codeResult!),
             if (message.pluginsUsed.isNotEmpty) _pluginsUsedBadge(message.pluginsUsed),
             if (message.costChip != null || message.timeChip != null)
@@ -770,6 +772,78 @@ class _ChatBubbleState extends State<ChatBubble> {
           children: results.map(_searchResultTile).toList(),
         ),
       );
+
+  /// Daftar sumber riset mendalam (dari /research) — kartu "Sumber [n]"
+  /// dengan judul, snippet, dan link clickable, konsisten dengan gaya
+  /// [._searchResultTile] namun dengan nomor urut di depan.
+  Widget _researchSourcesList(List<Map<String, String>> sources) => Padding(
+        padding: const EdgeInsets.only(top: 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Sumber:',
+                style: TextStyle(fontSize: 11, color: JeonColors.inkMuted, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 6),
+            ...List.generate(sources.length, (i) => _researchSourceTile(i + 1, sources[i])),
+          ],
+        ),
+      );
+
+  Widget _researchSourceTile(int n, Map<String, String> r) {
+    final title = (r['title'] ?? '').trim().isNotEmpty ? r['title']! : (r['url'] ?? 'Sumber $n');
+    final url = r['url'] ?? '';
+    final snippet = r['snippet'] ?? '';
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A2E),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            onTap: url.isEmpty ? null : () => _openUrl(url),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  margin: const EdgeInsets.only(top: 1, right: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                  decoration: BoxDecoration(
+                    color: JeonColors.accent.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text('[$n]',
+                      style: const TextStyle(fontSize: 11, color: JeonColors.accent, fontWeight: FontWeight.w800)),
+                ),
+                Expanded(
+                  child: Text(title,
+                      style: const TextStyle(
+                          fontSize: 13,
+                          color: JeonColors.ink,
+                          decoration: TextDecoration.underline,
+                          fontWeight: FontWeight.w600)),
+                ),
+              ],
+            ),
+          ),
+          if (snippet.isNotEmpty) ...[
+            const SizedBox(height: 3),
+            Text(snippet, style: const TextStyle(fontSize: 11.5, color: JeonColors.inkMuted, height: 1.3)),
+          ],
+          if (url.isNotEmpty) ...[
+            const SizedBox(height: 3),
+            Text(url,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 10.5, color: _analysisGreen)),
+          ],
+        ],
+      ),
+    );
+  }
 
   Widget _searchResultTile(Map<String, String> r) {
     final title = (r['title'] ?? '').trim().isNotEmpty ? r['title']! : (r['url'] ?? 'Hasil');

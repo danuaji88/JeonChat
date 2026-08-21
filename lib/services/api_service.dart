@@ -512,6 +512,21 @@ class ApiService {
     return (res['results'] as List?) ?? [];
   }
 
+  /// Riset mendalam ala Perplexity via /research — jawaban AI + sitasi [n]
+  /// + daftar sumber {title, url, snippet}. Dipakai tombol "Riset Mendalam".
+  Future<Map<String, dynamic>> research(String query,
+      {int maxSources = 6, String lang = 'id'}) async {
+    final res = await _post('/research',
+        {'query': query, 'max_sources': maxSources, 'lang': lang},
+        timeout: const Duration(seconds: 90));
+    return {
+      'answer': (res['answer'] ?? '').toString(),
+      'sources': (res['sources'] as List?) ?? [],
+      'model': (res['model'] ?? '').toString(),
+      'source_type': (res['source_type'] ?? '').toString(),
+    };
+  }
+
   /// Upload dokumen buat RAG via /upload.
   Future<Map<String, dynamic>> uploadDoc(String name, String text) =>
       _post('/upload', {'name': name, 'text': text}, timeout: const Duration(seconds: 60));
