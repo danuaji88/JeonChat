@@ -91,9 +91,9 @@ class _ChatBubbleState extends State<ChatBubble> {
   // balasan — baik lewat sintaks markdown image maupun URL polos.
   static final _markdownImageRegex = RegExp(r'!\[[^\]]*\]\(([^)]+)\)');
   static final _directImageUrlRegex =
-      RegExp(r'https?://[^\s\)\]]+\.(jpg|jpeg|png|gif|webp)(\?[^\s]*)?', caseSensitive: false);
+      RegExp(r'https?://[^\s\)\]]+\.(jpg|jpeg|png|gif|webp|bmp)(\?[^\s]*)?', caseSensitive: false);
   static final _directVideoUrlRegex =
-      RegExp(r'https?://[^\s\)\]]+\.(mp4|webm)(\?[^\s]*)?', caseSensitive: false);
+      RegExp(r'https?://[^\s\)\]]+\.(mp4|mov|avi|mkv|webm)(\?[^\s]*)?', caseSensitive: false);
 
   // ---- Edit pesan user (lihat _startEdit/_cancelEdit/_confirmEdit) ----
   bool _editing = false;
@@ -173,11 +173,14 @@ class _ChatBubbleState extends State<ChatBubble> {
     }
     final media = isUser ? null : _extractMediaUrl(message.text);
     // Kalau ada media, jangan tampilkan markdown/URL mentahnya lagi di teks —
-    // gambarnya sudah dirender di atas, teks mentah cuma bikin duplikat.
+    // gambar/videonya sudah dirender di atas, teks mentah cuma bikin duplikat
+    // (video sebelumnya kelewat di sini — URL .mp4 mentah tetap kelihatan
+    // dobel di bawah player-nya).
     String cleanText = message.text;
     if (media != null) {
       cleanText = message.text.replaceAll(_markdownImageRegex, '').trim();
       cleanText = cleanText.replaceAll(_directImageUrlRegex, '').trim();
+      cleanText = cleanText.replaceAll(_directVideoUrlRegex, '').trim();
     }
     // Skill & Plugin Orchestrator — backend menyisipkan label mentah ini
     // kalau balasan disusun lewat skill otonom; dilucuti dari teks, diganti
@@ -278,7 +281,7 @@ class _ChatBubbleState extends State<ChatBubble> {
               media.isVideo ? _videoUrlPlaceholder(media.url) : _markdownImagePreview(context, media.url),
             if (isUser && _editing)
               _editField()
-            else
+            else if (cleanText.isNotEmpty)
               SelectableText(
                 cleanText,
                 style: TextStyle(
