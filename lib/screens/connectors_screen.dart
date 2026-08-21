@@ -42,6 +42,8 @@ class _ConnectorsScreenState extends State<ConnectorsScreen> with WidgetsBinding
 
   bool _sheetsLoading = false;
   List<List<dynamic>>? _sheetsRows;
+  final _sheetsIdController = TextEditingController();
+  String _sheetsError = '';
 
   @override
   void initState() {
@@ -54,6 +56,7 @@ class _ConnectorsScreenState extends State<ConnectorsScreen> with WidgetsBinding
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _gmailQueryController.dispose();
+    _sheetsIdController.dispose();
     super.dispose();
   }
 
@@ -218,10 +221,48 @@ class _ConnectorsScreenState extends State<ConnectorsScreen> with WidgetsBinding
   }
 
   Future<void> _loadSheet() async {
-    setState(() => _sheetsLoading = true);
+    setState(() {
+      _sheetsLoading = true;
+      _sheetsError = '';
+    });
     try {
-      final res = await widget.api
-          .connectorAction('sheets_get', const {'spreadsheet_id': '', 'range': 'A1:F10'});
+      // ID spreadsheet dari input user. Kalau kosong, coba ambil otomatis
+      // spreadsheet pertama dari akun (biar tombol "Baca sheet" tetap
+      // berfungsi tanpa harus tahu ID).
+      var spreadsheetId = _sheetsIdController.text.trim();
+      List<Map<String, dynamic>>? candidates;
+      if (spreadsheetId.isEmpty) {
+        final listRes = await widget.api
+            .connectorAction('sheets_list', const {'query': '', 'max': 5});
+        candidates = _extractList(listRes, ['files', 'items', 'results']);
+        if (candidates.isNotEmpty) {
+          spreadsheetId = (candidates.first['id'] ??
+                  candidates.first['spreadsheetId'] ??
+                  '')
+              .toString();
+        }
+      }
+      if (spreadsheetId.isEmpty) {
+        if (!mounted) return;
+        setState(() {
+          _sheetsLoading = false;
+          _sheetsRows = null;
+          _sheetsError =
+              'Tidak ada spreadsheet ditemukan. Masukkan ID spreadsheet di kolom atas.';
+        });
+        return;
+      }
+      final res = await widget.api.connectorAction(
+          'sheets_get', {'spreadsheet_id': spreadsheetId, 'range': 'A1:F10'});
+      if (res['error'] != null) {
+        if (!mounted) return;
+        setState(() {
+          _sheetsLoading = false;
+          _sheetsRows = null;
+          _sheetsError = res['error'].toString();
+        });
+        return;
+      }
       final raw = res['values'] ?? res['rows'];
       final rows = raw is List ? raw.whereType<List>().map((r) => r.toList()).toList() : <List<dynamic>>[];
       if (!mounted) return;
@@ -231,8 +272,10 @@ class _ConnectorsScreenState extends State<ConnectorsScreen> with WidgetsBinding
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() => _sheetsLoading = false);
-      _showError('Gagal baca sheet: $e');
+      setState(() {
+        _sheetsLoading = false;
+        _sheetsError = 'Gagal baca sheet: $e';
+      });
     }
   }
 
@@ -575,7 +618,34 @@ class _ConnectorsScreenState extends State<ConnectorsScreen> with WidgetsBinding
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _outlineActionButton('Baca sheet', loading: _sheetsLoading, onTap: _sheetsLoading ? null : _loadSheet),
+        // Input ID spreadsheet (opsional — kosong = coba spreadsheet pertama).
+        TextField(
+          controller: _sheetsIdController,
+          style: const TextStyle(fontSize: 12.5, color: JeonColors.ink),
+          decoration: InputDecoration(
+            hintText: 'ID spreadsheet (opsional, kosong = otomatis)',
+            hintStyle: const TextStyle(fontSize: 12, color: JeonColors.inkFaint),
+            isDense: true,
+            filled: true,
+            fillColor: JeonColors.surface2,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: JeonColors.borderSoft),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: JeonColors.borderSoft),
+            ),
+          ),
+          onSubmitted: (_) => _loadSheet(),
+        ),
+        const SizedBox(height: 8),
+        _outlineActionButton('Buka sheet', loading: _sheetsLoading, onTap: _sheetsLoading ? null : _loadSheet),
+        if (_sheetsError.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text(_sheetsError, style: const TextStyle(fontSize: 12, color: Color(0xFFE57373))),
+        ],
         if (_sheetsRows != null) ...[
           const SizedBox(height: 10),
           if (_sheetsRows!.isEmpty)
