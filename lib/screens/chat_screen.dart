@@ -1952,7 +1952,12 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
           ),
         ],
       ),
-      body: Column(
+      body: Center(
+        child: ConstrainedBox(
+          // ChatGPT-style centered reading column — no-op di layar sempit
+          // (mobile) karena maxWidth cuma jadi batas atas, bukan lebar tetap.
+          constraints: const BoxConstraints(maxWidth: 800),
+          child: Column(
         children: [
           Expanded(
             child: DropTarget(
@@ -2090,6 +2095,8 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
             onToggleVoiceMode: _toggleVoiceMode,
           ),
         ],
+          ),
+        ),
       ),
     );
 

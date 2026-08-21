@@ -220,13 +220,13 @@ class _ChatBubbleState extends State<ChatBubble> {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
         decoration: BoxDecoration(
           color: isUser
-              ? JeonColors.accent.withValues(alpha: 0.15)
+              ? JeonColors.accent.withValues(alpha: 0.22)
               : message.isAnalysis
                   ? _analysisGreen.withValues(alpha: 0.14)
-                  : JeonColors.surface2,
+                  : JeonColors.surface3,
           border: Border.all(
             color: isUser
-                ? JeonColors.accent.withValues(alpha: 0.3)
+                ? JeonColors.accent.withValues(alpha: 0.4)
                 : message.isAnalysis
                     ? _analysisGreen.withValues(alpha: 0.4)
                     : JeonColors.borderSoft,
