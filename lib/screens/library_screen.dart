@@ -652,9 +652,31 @@ class _LibraryScreenState extends State<LibraryScreen> {
     } catch (e) {
       debugPrint('Upload file gagal: $e');
       if (!mounted) return;
-      final friendly = e.toString().contains('file_kosong')
-          ? 'File gagal diupload (kosong) — coba pilih ulang file yang berbeda atau refresh halaman lalu coba lagi.'
-          : 'Gagal upload file: $e';
+      final raw = e.toString();
+      String friendly;
+      if (raw.contains('file_kosong')) {
+        friendly = 'File gagal diupload (kosong) — coba pilih ulang file yang berbeda atau refresh halaman lalu coba lagi.';
+      } else {
+        // Backend kadang balas body JSON mentah (mis. "Upload gagal (400):
+        // {"error":"..."}") — coba ambil pesan bersihnya dulu, jangan
+        // tampilkan JSON mentah itu ke user.
+        String? cleanMessage;
+        final braceIndex = raw.indexOf('{');
+        if (braceIndex != -1) {
+          try {
+            final decoded = jsonDecode(raw.substring(braceIndex));
+            if (decoded is Map) {
+              final msg = (decoded['message'] ?? decoded['error'] ?? decoded['detail'])?.toString().trim();
+              if (msg != null && msg.isNotEmpty) cleanMessage = msg;
+            }
+          } catch (_) {
+            // Bukan JSON valid — pakai fallback generik di bawah.
+          }
+        }
+        friendly = cleanMessage != null
+            ? 'Gagal upload file: $cleanMessage'
+            : 'Gagal upload file. Coba lagi beberapa saat lagi.';
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(friendly)),
       );
