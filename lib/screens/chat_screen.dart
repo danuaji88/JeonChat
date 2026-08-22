@@ -72,6 +72,11 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
   // externalPromptText), pola sama dengan _externalAttachment di atas. ----
   final ValueNotifier<String?> _externalPromptText = ValueNotifier(null);
 
+  // ---- "Upload Video" (dipindah dari menu "+" ke menu "More" — lihat
+  // _openMoreMenu) — increment nilai ini untuk memicu file picker video di
+  // input_bar.dart dari luar (lihat JeonChatInputBar.triggerVideoUpload). ----
+  final ValueNotifier<int> _triggerVideoUpload = ValueNotifier(0);
+
   // ---- Sidebar JeonChat + multi-conversation ----
   String? _conversationId;
   List<Map<String, dynamic>> _conversations = [];
@@ -881,6 +886,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
     _scrollController.dispose();
     _externalAttachment.dispose();
     _externalPromptText.dispose();
+    _triggerVideoUpload.dispose();
     _notificationTimer?.cancel();
     super.dispose();
   }
@@ -1717,7 +1723,8 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
   }
 
   /// Nav sidebar "More" — overflow fitur yang tidak dapat slot nav utama
-  /// (saat ini cuma Skills; wadah ini yang bikin gampang nambah entri lain
+  /// (Skills + Upload Video — video dipindah ke sini dari menu "+" biar
+  /// menu "+" tetap ringkas; wadah ini yang bikin gampang nambah entri lain
   /// nanti tanpa bikin sidebar penuh).
   void _openMoreMenu() {
     showModalBottomSheet(
@@ -1741,6 +1748,16 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
               onTap: () {
                 Navigator.of(sheetContext).pop();
                 _openSkills();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.video_library, size: 19, color: JeonColors.ink),
+              title: const Text('Upload Video', style: TextStyle(fontSize: 13.6, color: JeonColors.ink)),
+              subtitle: const Text('Maks 5 video per pesan',
+                  style: TextStyle(fontSize: 11, color: JeonColors.inkFaint)),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                _triggerVideoUpload.value++;
               },
             ),
             const SizedBox(height: 8),
@@ -2197,6 +2214,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
             externalAttachment: _externalAttachment,
             conversationId: _conversationId,
             externalPromptText: _externalPromptText,
+            triggerVideoUpload: _triggerVideoUpload,
             onGenerateImage: (p) => _requireAccount(() => _generateImageDirect(p)),
             onSearchWeb: _searchWeb,
             onDeepResearch: (t) => _requireAuth(() => _deepResearch(t)),

@@ -89,6 +89,13 @@ class JeonChatInputBar extends StatefulWidget {
   /// percakapan baru yang belum tersimpan, pakai key draft terpisah.
   final String? conversationId;
 
+  /// Kanal "Upload Video" dari menu "More" (sidebar) — chat_screen.dart
+  /// increment nilainya untuk memicu _pickVideoAttachment() dari luar
+  /// (tombolnya sendiri sudah dipindah dari menu "+" ke More, lihat
+  /// _openMoreMenu di chat_screen.dart). Pola sama dengan
+  /// externalPromptText/externalAttachment di atas.
+  final ValueListenable<int>? triggerVideoUpload;
+
   /// Kanal "Coba Skill" (Plugins Store) — chat_screen.dart dorong prompt
   /// contoh ke sini, langsung diisikan ke _controller (kolom chat), bukan
   /// otomatis terkirim. Pola sama dengan [externalAttachment] di atas.
@@ -133,6 +140,7 @@ class JeonChatInputBar extends StatefulWidget {
     required this.onFetchLibrary,
     this.externalAttachment,
     this.conversationId,
+    this.triggerVideoUpload,
     this.externalPromptText,
     required this.onSpeechToText,
     this.activePluginCount = 0,
@@ -205,7 +213,12 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
     listenForImagePaste((name, bytes) => _uploadBytesAndAttach(name, bytes));
     widget.externalAttachment?.addListener(_onExternalAttachment);
     widget.externalPromptText?.addListener(_onExternalPromptText);
+    widget.triggerVideoUpload?.addListener(_onTriggerVideoUpload);
   }
+
+  /// "Upload Video" dari menu "More" (lihat widget.triggerVideoUpload) —
+  /// memicu file picker video yang sama dengan tombol "+" lama.
+  void _onTriggerVideoUpload() => _pickVideoAttachment();
 
   /// "Coba Skill" dari Plugins Store (lihat widget.externalPromptText) —
   /// prompt contoh diisikan ke kolom chat, TIDAK otomatis terkirim, supaya
@@ -297,6 +310,7 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
     stopListeningForImagePaste();
     widget.externalAttachment?.removeListener(_onExternalAttachment);
     widget.externalPromptText?.removeListener(_onExternalPromptText);
+    widget.triggerVideoUpload?.removeListener(_onTriggerVideoUpload);
     _controller.dispose();
     _textFocusNode.dispose();
     _speech.stop();
