@@ -1016,7 +1016,7 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
                       height: 14,
                       child: CircularProgressIndicator(strokeWidth: 2, color: JeonColors.accent)),
                   SizedBox(width: 8),
-                  Text('Mengupload...',
+                  Text('Meng-upload file...',
                       style: TextStyle(fontSize: 12, color: JeonColors.accent, fontWeight: FontWeight.w600)),
                 ],
               ),

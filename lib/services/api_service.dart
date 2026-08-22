@@ -219,8 +219,23 @@ class ApiService {
         : <String, dynamic>{};
   }
 
+  /// Backend /upload/file & /library kadang balas URL file sebagai path
+  /// relatif (mis. "/files/abc123.mp4") alih-alih URL absolut. Kalau path
+  /// relatif itu dipakai langsung di Image.network/VideoMessagePlayer/link
+  /// download, browser me-resolve-nya relatif terhadap origin APP FLUTTER
+  /// (bukan chat.jeonlive.com) — hasilnya file 404 (bukan gagal upload-nya,
+  /// tapi gagal diakses SETELAH upload sukses). Fungsi ini memastikan URL
+  /// yang keluar dari ApiService selalu absolut.
+  String _absoluteUrl(String url) {
+    if (url.isEmpty || url.startsWith('http://') || url.startsWith('https://')) {
+      return url;
+    }
+    return url.startsWith('/') ? '$baseUrl$url' : '$baseUrl/$url';
+  }
+
   /// Upload file biner nyata ke server → /upload/file. [name] = nama file,
-  /// [bytes] = isi mentah. Mengembalikan {name, url, size, status}.
+  /// [bytes] = isi mentah. Mengembalikan {name, url, size, status} — [url]
+  /// sudah dipastikan absolut (lihat _absoluteUrl).
   Future<Map<String, dynamic>> uploadFile({required String name, required List<int> bytes}) async {
     final res = await http
         .post(
@@ -233,13 +248,30 @@ class ApiService {
       throw ApiException('Upload gagal (${res.statusCode}): ${res.body}');
     }
     final data = jsonDecode(res.body);
-    return (data is Map<String, dynamic>) ? data : <String, dynamic>{};
+    if (data is! Map<String, dynamic>) return <String, dynamic>{};
+    final result = Map<String, dynamic>.from(data);
+    final url = result['url']?.toString();
+    if (url != null) result['url'] = _absoluteUrl(url);
+    return result;
   }
 
   /// Daftar file yang pernah diupload user (maks 50 item terbaru) via
   /// /library — dipakai menu "+" → "Tambah dari Library" di input bar.
-  /// {items: [{name, url, kind, size, uploaded_at}], total}.
-  Future<Map<String, dynamic>> getLibrary() => _get('/library', timeout: const Duration(seconds: 30));
+  /// {items: [{name, url, kind, size, uploaded_at}], total} — tiap [url]
+  /// dipastikan absolut (lihat _absoluteUrl, alasan sama seperti uploadFile).
+  Future<Map<String, dynamic>> getLibrary() async {
+    final res = await _get('/library', timeout: const Duration(seconds: 30));
+    final items = res['items'];
+    if (items is! List) return res;
+    final normalized = items.map((raw) {
+      if (raw is! Map) return raw;
+      final item = Map<String, dynamic>.from(raw);
+      final url = item['url']?.toString();
+      if (url != null) item['url'] = _absoluteUrl(url);
+      return item;
+    }).toList();
+    return {...res, 'items': normalized};
+  }
 
   // ---- Instruksi Kustom (Fitur #4) via /instructions — backend sudah live,
   // action get/save/clear. {email, about_me, response_style, enabled,
