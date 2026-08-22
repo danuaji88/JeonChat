@@ -2195,6 +2195,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
             isGenerating: _isGenerating,
             onStop: _stopGeneration,
             externalAttachment: _externalAttachment,
+            conversationId: _conversationId,
             externalPromptText: _externalPromptText,
             onGenerateImage: (p) => _requireAccount(() => _generateImageDirect(p)),
             onSearchWeb: _searchWeb,
