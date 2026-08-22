@@ -243,7 +243,11 @@ class ApiService {
           headers: _headers,
           body: jsonEncode({'name': name, 'data_base64': base64Encode(bytes)}),
         )
-        .timeout(const Duration(seconds: 60), onTimeout: () => throw ApiException('Timeout: upload melebihi 60 detik.'));
+        // 180 detik (dinaikkan dari 60) — file besar (video/dokumen sampai
+        // 50MB, jadi ~67MB setelah base64) butuh waktu lebih di koneksi
+        // lambat, terutama saat upload banyak file sekaligus bergiliran.
+        .timeout(const Duration(seconds: 180),
+            onTimeout: () => throw ApiException('Timeout: upload melebihi 180 detik.'));
     if (res.statusCode != 200) {
       throw ApiException('Upload gagal (${res.statusCode}): ${res.body}');
     }

@@ -179,9 +179,21 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
   static const _maxPendingVideos = 5;
   static const _pendingVideosPrefsPrefix = 'jeon_pending_videos_';
   List<_PendingAttachment> _pendingVideos = [];
-  double? _uploadProgress; // null = tidak sedang upload video
+
+  // ---- Multi-upload dokumen/file bebas format (PDF, Docx, Xlsx, Zip, Rar,
+  // dll — apa pun lewat FileType.any) — antrean terpisah lagi dari
+  // _pendingVideos, pola identik (maks 5, progress per-file, dipersist per
+  // conversationId) supaya "Upload Dokumen/File" juga dukung multi-file. ----
+  static const _maxPendingDocs = 5;
+  static const _pendingDocsPrefsPrefix = 'jeon_pending_docs_';
+  List<_PendingAttachment> _pendingDocs = [];
+
+  // Progress upload (dipakai bareng video & dokumen — keduanya tidak pernah
+  // jalan bersamaan dalam satu waktu, digerbangi _attachmentBusy).
+  double? _uploadProgress; // null = tidak sedang upload
   int _uploadDone = 0;
   int _uploadTotal = 0;
+  String _uploadLabel = 'file'; // 'video' atau 'file' — dipakai teks progress bar
 
   ModelOption get _selected =>
       _selectedModel ??
@@ -210,6 +222,7 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
     _initSpeech();
     _restoreSelectedModel();
     _loadPendingVideos();
+    _loadPendingDocs();
     // Paste gambar (Ctrl+V) — no-op di non-web (lihat clipboard_paste_stub.dart).
     listenForImagePaste((name, bytes) => _uploadBytesAndAttach(name, bytes));
     widget.externalAttachment?.addListener(_onExternalAttachment);
@@ -299,10 +312,12 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
     // modelOptions kadang baru siap (fetch dari /models) setelah initState —
     // coba cocokkan lagi preferensi tersimpan begitu daftar model berubah.
     if (_pendingSelectedValue != null) _applyPendingSelectedModel();
-    // Pindah percakapan — muat ulang antrean video draft milik percakapan
-    // yang baru aktif (masing-masing conversationId punya draft sendiri).
+    // Pindah percakapan — muat ulang antrean video/dokumen draft milik
+    // percakapan yang baru aktif (masing-masing conversationId punya draft
+    // sendiri).
     if (oldWidget.conversationId != widget.conversationId) {
       _loadPendingVideos();
+      _loadPendingDocs();
     }
   }
 
@@ -325,14 +340,16 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
     final text = (preset ?? _controller.text).trim();
     final attachment = _pendingAttachment;
     final videos = _pendingVideos;
+    final docs = _pendingDocs;
     // Boleh kirim lampiran tanpa teks (ala WhatsApp/Telegram), tapi tidak
     // boleh semuanya kosong.
-    if (text.isEmpty && attachment == null && videos.isEmpty) return;
+    if (text.isEmpty && attachment == null && videos.isEmpty && docs.isEmpty) return;
 
-    // Tiap video jadi pesan terpisah (reuse pipeline lampiran tunggal yang
-    // sudah ada di onSend/chat_screen.dart, bukan bikin jalur baru) — caption
-    // cuma nempel di lampiran PERTAMA (attachment gambar/dok kalau ada,
-    // kalau tidak video pertama) biar tidak spam teks yang sama berkali-kali.
+    // Tiap video/dokumen jadi pesan terpisah (reuse pipeline lampiran
+    // tunggal yang sudah ada di onSend/chat_screen.dart, bukan bikin jalur
+    // baru) — caption cuma nempel di lampiran PERTAMA (attachment
+    // gambar/dok tunggal kalau ada, lalu video, baru dokumen) biar tidak
+    // spam teks yang sama berkali-kali.
     var captionUsed = false;
     if (attachment != null) {
       widget.onSend(
@@ -354,6 +371,16 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
       );
       captionUsed = true;
     }
+    for (final doc in docs) {
+      widget.onSend(
+        captionUsed ? '' : text,
+        _selected.value,
+        attachmentUrl: doc.url,
+        attachmentName: doc.name,
+        attachmentKind: doc.kind,
+      );
+      captionUsed = true;
+    }
     if (!captionUsed && text.isNotEmpty) {
       widget.onSend(text, _selected.value);
     }
@@ -363,6 +390,10 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
     if (videos.isNotEmpty) {
       setState(() => _pendingVideos = []);
       _savePendingVideos();
+    }
+    if (docs.isNotEmpty) {
+      setState(() => _pendingDocs = []);
+      _savePendingDocs();
     }
   }
 
@@ -488,21 +519,170 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
     widget.onVoiceModeResult(spoken);
   }
 
-  /// "Upload Dokumen / File" — lampiran nyata (bebas tipe file), lewat
-  /// jalur upload/attach yang sama dengan Upload Gambar/Video (preview di
-  /// atas input bar, lalu terkirim bareng pesan berikutnya).
+  /// Bersihkan pesan error upload jadi ringkas untuk SnackBar — backend
+  /// kadang balas body JSON mentah (mis. "Upload gagal (413): {...}"),
+  /// jangan ditampilkan mentah-mentah ke user (pola sama dengan
+  /// library_screen.dart _uploadFiles).
+  String _friendlyUploadError(Object e) {
+    final raw = e.toString();
+    final braceIndex = raw.indexOf('{');
+    if (braceIndex != -1) {
+      try {
+        final decoded = jsonDecode(raw.substring(braceIndex));
+        if (decoded is Map) {
+          final msg = (decoded['message'] ?? decoded['error'] ?? decoded['detail'])?.toString().trim();
+          if (msg != null && msg.isNotEmpty) return msg;
+        }
+      } catch (_) {
+        // Bukan JSON valid — pakai raw string apa adanya di bawah.
+      }
+    }
+    return raw;
+  }
+
+  /// "Upload Dokumen / File" — FileType.any (bebas format apa pun: PDF,
+  /// Docx, Xlsx, Zip, Rar, dll), multi-select sampai [_maxPendingDocs] file
+  /// sekaligus, diupload satu per satu (progress per-file). Pola identik
+  /// dengan _pickVideoAttachment (antrean _pendingDocs, dipersist per
+  /// percakapan lewat _savePendingDocs) — file gagal/ditolak dilewati, tidak
+  /// menghentikan seluruh batch.
   Future<void> _pickDocumentAttachment() async {
     if (_attachmentBusy) return;
     try {
-      final result = await FilePicker.platform.pickFiles(type: FileType.any, withData: true);
+      final result = await FilePicker.platform.pickFiles(type: FileType.any, allowMultiple: true, withData: true);
       if (result == null || result.files.isEmpty) return;
-      await _uploadPlatformFile(result.files.first);
+
+      final remainingSlots = _maxPendingDocs - _pendingDocs.length;
+      if (remainingSlots <= 0) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Maksimal 5 file per pesan — hapus salah satu dulu.')),
+        );
+        return;
+      }
+      var files = result.files;
+      final truncated = files.length > remainingSlots;
+      if (truncated) files = files.sublist(0, remainingSlots);
+
+      setState(() {
+        _attachmentBusy = true;
+        _uploadLabel = 'file';
+        _uploadTotal = files.length;
+        _uploadDone = 0;
+        _uploadProgress = 0.0;
+      });
+      for (final file in files) {
+        final bytes = file.bytes;
+        if (bytes == null || bytes.isEmpty) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('File "${file.name}" gagal dibaca — dilewati.')),
+            );
+          }
+        } else if (bytes.length > _maxUploadBytes) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('File "${file.name}" terlalu besar (maks 50MB) — dilewati.')),
+            );
+          }
+        } else {
+          try {
+            final up = await widget.onUploadAttachment(file.name, bytes);
+            final url = (up['url'] ?? '').toString();
+            if (url.isNotEmpty && mounted) {
+              setState(() {
+                _pendingDocs = [
+                  ..._pendingDocs,
+                  _PendingAttachment(
+                    name: (up['name'] ?? file.name).toString(),
+                    url: url,
+                    kind: _inferAttachmentKind(file.name),
+                    sizeLabel: _formatAttachmentSize(bytes.length),
+                  ),
+                ];
+              });
+            }
+          } catch (e) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('File "${file.name}" gagal diupload: ${_friendlyUploadError(e)}')),
+              );
+            }
+          }
+        }
+        if (!mounted) return;
+        setState(() {
+          _uploadDone++;
+          _uploadProgress = _uploadTotal == 0 ? 1.0 : _uploadDone / _uploadTotal;
+        });
+      }
+      await _savePendingDocs();
+      if (truncated && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Sebagian file tidak ditambahkan — maksimal 5 file per pesan.')),
+        );
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Gagal memilih dokumen: $e')),
+        SnackBar(content: Text('Gagal memilih file: ${_friendlyUploadError(e)}')),
       );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _attachmentBusy = false;
+          _uploadProgress = null;
+        });
+      }
     }
+  }
+
+  String get _pendingDocsPrefsKey => '$_pendingDocsPrefsPrefix${widget.conversationId ?? '_draft'}';
+
+  /// Muat draft file terlampir milik percakapan aktif — pola sama dengan
+  /// _loadPendingVideos.
+  Future<void> _loadPendingDocs() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_pendingDocsPrefsKey);
+    var loaded = <_PendingAttachment>[];
+    if (raw != null && raw.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(raw) as List;
+        loaded = decoded
+            .whereType<Map>()
+            .map((m) => _PendingAttachment(
+                  name: (m['name'] ?? '').toString(),
+                  url: (m['url'] ?? '').toString(),
+                  kind: (m['kind'] ?? 'document').toString(),
+                  sizeLabel: m['sizeLabel']?.toString(),
+                ))
+            .where((a) => a.url.isNotEmpty)
+            .toList();
+      } catch (_) {
+        // Data draft lama rusak/format tidak dikenal — mulai dari kosong.
+      }
+    }
+    if (!mounted) return;
+    setState(() => _pendingDocs = loaded);
+  }
+
+  /// Simpan (atau hapus kalau kosong) draft file terlampir milik percakapan
+  /// aktif — pola sama dengan _savePendingVideos.
+  Future<void> _savePendingDocs() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (_pendingDocs.isEmpty) {
+      await prefs.remove(_pendingDocsPrefsKey);
+      return;
+    }
+    final encoded = jsonEncode(_pendingDocs
+        .map((a) => {'name': a.name, 'url': a.url, 'kind': a.kind, 'sizeLabel': a.sizeLabel})
+        .toList());
+    await prefs.setString(_pendingDocsPrefsKey, encoded);
+  }
+
+  void _removePendingDoc(_PendingAttachment doc) {
+    setState(() => _pendingDocs = _pendingDocs.where((d) => d.url != doc.url).toList());
+    _savePendingDocs();
   }
 
   /// "Upload Video (Semua Format)" — FileType.video (bawaan file_picker),
@@ -533,6 +713,7 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
 
       setState(() {
         _attachmentBusy = true;
+        _uploadLabel = 'video';
         _uploadTotal = files.length;
         _uploadDone = 0;
         _uploadProgress = 0.0;
@@ -571,7 +752,7 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
           } catch (e) {
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('Video "${file.name}" gagal diupload: $e')),
+                SnackBar(content: Text('Video "${file.name}" gagal diupload: ${_friendlyUploadError(e)}')),
               );
             }
           }
@@ -652,17 +833,6 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
     _savePendingVideos();
   }
 
-  Future<void> _uploadPlatformFile(PlatformFile file) async {
-    final bytes = file.bytes;
-    if (bytes == null) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Tidak bisa membaca isi file ini')),
-      );
-      return;
-    }
-    await _uploadBytesAndAttach(file.name, bytes);
-  }
 
   /// Upload file (bytes mentah) ke server (POST /upload/file lewat parent)
   /// lalu jadikan lampiran pending — dipakai bareng oleh Upload Gambar,
@@ -1030,7 +1200,16 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
               child: Wrap(
                 spacing: 8,
                 runSpacing: 8,
-                children: _pendingVideos.map(_videoAttachmentChip).toList(),
+                children: _pendingVideos.map((v) => _queuedFileChip(v, () => _removePendingVideo(v))).toList(),
+              ),
+            ),
+          if (_pendingDocs.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: _pendingDocs.map((d) => _queuedFileChip(d, () => _removePendingDoc(d))).toList(),
               ),
             ),
           Container(
@@ -1109,7 +1288,10 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
                       onPressed: widget.onStop,
                     ),
                   )
-                else if (_hasText || _pendingAttachment != null || _pendingVideos.isNotEmpty)
+                else if (_hasText ||
+                    _pendingAttachment != null ||
+                    _pendingVideos.isNotEmpty ||
+                    _pendingDocs.isNotEmpty)
                   Container(
                     decoration: const BoxDecoration(color: JeonColors.accent, shape: BoxShape.circle),
                     child: IconButton(
@@ -1206,9 +1388,9 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
     );
   }
 
-  /// Progress bar + status upload video (0%-100%, per-file — lihat catatan
-  /// di _pickVideoAttachment soal kenapa progress dihitung per-file, bukan
-  /// per-byte dalam satu file).
+  /// Progress bar + status upload video/dokumen (0%-100%, per-file — lihat
+  /// catatan di _pickVideoAttachment/_pickDocumentAttachment soal kenapa
+  /// progress dihitung per-file, bukan per-byte dalam satu file).
   Widget _uploadProgressBar() {
     final progress = _uploadProgress ?? 0.0;
     return Column(
@@ -1216,7 +1398,7 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
       children: [
         Row(
           children: [
-            Text('Meng-upload video... ($_uploadDone/$_uploadTotal)',
+            Text('Meng-upload $_uploadLabel... ($_uploadDone/$_uploadTotal)',
                 style: const TextStyle(fontSize: 12, color: JeonColors.accent, fontWeight: FontWeight.w600)),
             const Spacer(),
             Text('${(progress * 100).round()}%',
@@ -1237,9 +1419,11 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
     );
   }
 
-  /// Satu chip video di antrean _pendingVideos (maks 5) — nama+ukuran, tap
-  /// tombol X untuk hapus dari antrean sebelum dikirim.
-  Widget _videoAttachmentChip(_PendingAttachment video) => Container(
+  /// Satu chip lampiran di antrean _pendingVideos/_pendingDocs (maks 5
+  /// masing-masing) — nama+ukuran, tap tombol X untuk hapus dari antrean
+  /// sebelum dikirim. Dipakai bareng oleh video & dokumen (ikonnya
+  /// menyesuaikan [item.kind]).
+  Widget _queuedFileChip(_PendingAttachment item, VoidCallback onRemove) => Container(
         padding: const EdgeInsets.all(6),
         decoration: BoxDecoration(
           color: JeonColors.surface2,
@@ -1249,7 +1433,7 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            _kindIcon('video'),
+            _kindIcon(item.kind),
             const SizedBox(width: 8),
             ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 140),
@@ -1257,19 +1441,19 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(video.name,
+                  Text(item.name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: JeonColors.ink)),
-                  if (video.sizeLabel != null)
-                    Text(video.sizeLabel!, style: const TextStyle(fontSize: 10, color: JeonColors.inkFaint)),
+                  if (item.sizeLabel != null)
+                    Text(item.sizeLabel!, style: const TextStyle(fontSize: 10, color: JeonColors.inkFaint)),
                 ],
               ),
             ),
             const SizedBox(width: 4),
             InkWell(
               borderRadius: BorderRadius.circular(999),
-              onTap: () => _removePendingVideo(video),
+              onTap: onRemove,
               child: const Padding(
                 padding: EdgeInsets.all(4),
                 child: Icon(Icons.close_rounded, size: 16, color: JeonColors.inkMuted),
