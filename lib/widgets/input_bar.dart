@@ -445,10 +445,12 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
       final base64Audio = base64Encode(_recordedBytes);
       final text = await widget.onSpeechToText(base64Audio);
       if (!mounted) return;
-      if (text.trim().isNotEmpty) {
-        _controller.text = text.trim();
-        _controller.selection = TextSelection.collapsed(offset: _controller.text.length);
-      }
+      final transcribed = text.trim();
+      // Auto-send ala ChatGPT — transkrip langsung dikirim sebagai pesan
+      // (bukan cuma diisi ke field untuk direview manual), pakai model yang
+      // sedang aktif (_submit selalu baca _selected.value). _submit sendiri
+      // yang jaga guard isGenerating/lampiran, jadi cukup panggil langsung.
+      if (transcribed.isNotEmpty) _submit(transcribed);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Gagal transkrip suara: $e')));
