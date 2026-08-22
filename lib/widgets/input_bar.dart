@@ -2,9 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/foundation.dart' show ValueListenable;
+import 'package:flutter/foundation.dart' show ValueListenable, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:speech_to_text/speech_to_text.dart';
@@ -385,10 +386,24 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
         return;
       }
       _recordedBytes.clear();
-      final stream = await _audioRecorder.startStream(
-        const RecordConfig(encoder: AudioEncoder.pcm16bits, sampleRate: 16000, numChannels: 1),
-      );
-      _recordSub = stream.listen((chunk) => _recordedBytes.addAll(chunk));
+      if (kIsWeb) {
+        // Web: startStream() cuma dukung AudioEncoder.pcm16bits (raw PCM
+        // tanpa header/container apa pun) — backend /stt gagal decode
+        // ("Invalid data found when processing input", pesan khas
+        // ffmpeg/ffprobe untuk data tanpa signature format yang dikenali).
+        // Pakai start()/stop() dengan AudioEncoder.wav supaya hasil rekaman
+        // dibungkus header WAV/RIFF yang valid (lihat _stopRecordingAndTranscribe
+        // untuk cara ambil bytes-nya dari blob URL hasil stop()).
+        await _audioRecorder.start(
+          const RecordConfig(encoder: AudioEncoder.wav, sampleRate: 16000, numChannels: 1),
+          path: '',
+        );
+      } else {
+        final stream = await _audioRecorder.startStream(
+          const RecordConfig(encoder: AudioEncoder.pcm16bits, sampleRate: 16000, numChannels: 1),
+        );
+        _recordSub = stream.listen((chunk) => _recordedBytes.addAll(chunk));
+      }
       if (!mounted) return;
       setState(() => _recording = true);
     } catch (e) {
@@ -398,8 +413,9 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
   }
 
   Future<void> _stopRecordingAndTranscribe() async {
+    String? blobUrl;
     try {
-      await _audioRecorder.stop();
+      blobUrl = await _audioRecorder.stop();
     } catch (_) {
       // Sudah berhenti/tidak sempat mulai — lanjut proses apa yang sudah terekam.
     }
@@ -407,6 +423,21 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
     _recordSub = null;
     if (!mounted) return;
     setState(() => _recording = false);
+
+    if (kIsWeb && blobUrl != null && blobUrl.isNotEmpty) {
+      // record_web.stop() balikin blob: URL (bukan bytes langsung) —
+      // Blob-nya sudah berisi WAV lengkap (header + PCM) dari AudioEncoder.
+      // wav yang dipakai di _startRecording, tinggal di-fetch isinya.
+      try {
+        final res = await http.get(Uri.parse(blobUrl));
+        _recordedBytes
+          ..clear()
+          ..addAll(res.bodyBytes);
+      } catch (_) {
+        // Gagal ambil isi blob — _recordedBytes tetap kosong, ditangani
+        // guard "isEmpty" di bawah (tidak kirim data kosong ke /stt).
+      }
+    }
     if (_recordedBytes.isEmpty) return;
 
     setState(() => _sttLoading = true);
