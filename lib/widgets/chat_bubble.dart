@@ -893,7 +893,11 @@ class _ChatBubbleState extends State<ChatBubble> {
         padding: const EdgeInsets.only(top: 8),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: results.map(_searchResultTile).toList(),
+          children: [
+            _sourceCountBadge(results.length),
+            const SizedBox(height: 6),
+            ...results.map(_searchResultTile),
+          ],
         ),
       );
 
@@ -905,12 +909,27 @@ class _ChatBubbleState extends State<ChatBubble> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Sumber:',
-                style: TextStyle(fontSize: 11, color: JeonColors.inkMuted, fontWeight: FontWeight.w700)),
+            _sourceCountBadge(sources.length),
             const SizedBox(height: 6),
             ...List.generate(sources.length, (i) => _researchSourceTile(i + 1, sources[i])),
           ],
         ),
+      );
+
+  /// Indikator "diverifikasi dari N sumber" — dipakai bareng oleh hasil
+  /// "Cari di Web" (searchResults) dan "Riset Mendalam" (researchSources),
+  /// biar user langsung lihat jawabannya ditopang berapa referensi tanpa
+  /// perlu menghitung kartu sumber satu-satu.
+  Widget _sourceCountBadge(int count) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.verified_outlined, size: 13, color: JeonColors.accent),
+          const SizedBox(width: 4),
+          Text(
+            count == 1 ? 'Diverifikasi dari 1 sumber' : 'Diverifikasi dari $count sumber',
+            style: const TextStyle(fontSize: 11, color: JeonColors.inkMuted, fontWeight: FontWeight.w700),
+          ),
+        ],
       );
 
   Widget _researchSourceTile(int n, Map<String, String> r) {

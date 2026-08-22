@@ -888,10 +888,6 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
               Navigator.of(sheetContext).pop();
               _promptFor('Riset Mendalam', 'Topik riset apa?', widget.onDeepResearch);
             }),
-            _plusMenuTile(Icons.auto_awesome_outlined, 'Skills', onTap: () {
-              Navigator.of(sheetContext).pop();
-              widget.onOpenSkills?.call();
-            }),
             const SizedBox(height: 8),
           ],
         ),

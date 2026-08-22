@@ -1486,7 +1486,9 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
         typing,
         ChatMessage(
           isUser: false,
-          text: results.isEmpty ? 'Tidak ada hasil untuk "$query".' : 'Hasil pencarian untuk "$query":',
+          text: results.isEmpty
+              ? 'Tidak ada hasil untuk "$query".'
+              : 'Ditemukan ${results.length} sumber untuk "$query":',
           searchResults: results,
         ),
       );
@@ -1803,7 +1805,7 @@ class _JeonChatScreenState extends State<JeonChatScreen> {
           typing,
           ChatMessage(
             isUser: false,
-            text: answer.isEmpty ? 'Hasil riset untuk "$topic":' : answer,
+            text: answer.isEmpty ? 'Hasil riset dari ${sources.length} sumber untuk "$topic":' : answer,
             researchSources: sources.isNotEmpty ? sources : null,
           ),
         );
