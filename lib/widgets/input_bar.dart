@@ -5,7 +5,6 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:speech_to_text/speech_to_text.dart';
@@ -442,43 +441,6 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
     widget.onVoiceModeResult(spoken);
   }
 
-  /// "Analisis Gambar" di menu "+" — pilih gambar, baca sebagai base64,
-  /// kirim ke parent buat ditampilkan sebagai bubble user + dianalisis
-  /// lewat analyzeImage().
-  Future<void> _pickAndAnalyzeImage() async {
-    try {
-      final picked = await ImagePicker().pickImage(
-        source: ImageSource.gallery,
-        maxWidth: 1280,
-        maxHeight: 1280,
-        imageQuality: 80,
-      );
-      if (picked == null) return;
-      final bytes = await picked.readAsBytes();
-      final base64Image = base64Encode(bytes);
-      widget.onAnalyzeImage(base64Image, _mimeFromName(picked.name));
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Gagal memilih gambar: $e')),
-      );
-    }
-  }
-
-  String _mimeFromName(String name) {
-    final ext = name.contains('.') ? name.substring(name.lastIndexOf('.') + 1).toLowerCase() : 'jpg';
-    switch (ext) {
-      case 'png':
-        return 'image/png';
-      case 'gif':
-        return 'image/gif';
-      case 'webp':
-        return 'image/webp';
-      default:
-        return 'image/jpeg';
-    }
-  }
-
   /// "Upload Dokumen / File" — lampiran nyata (bebas tipe file), lewat
   /// jalur upload/attach yang sama dengan Upload Gambar/Video (preview di
   /// atas input bar, lalu terkirim bareng pesan berikutnya).
@@ -492,24 +454,6 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Gagal memilih dokumen: $e')),
-      );
-    }
-  }
-
-  /// "Upload Gambar" — beda dari "Analisis Gambar" (langsung dianalisis AI
-  /// sekali pakai): ini persis ala WhatsApp/Telegram — gambar jadi lampiran
-  /// (preview di atas input bar dulu) dan baru terkirim bareng pesan
-  /// berikutnya, bukan langsung dikirim/dianalisis saat dipilih.
-  Future<void> _pickImageAttachment() async {
-    if (_attachmentBusy) return;
-    try {
-      final result = await FilePicker.platform.pickFiles(type: FileType.image, withData: true);
-      if (result == null || result.files.isEmpty) return;
-      await _uploadPlatformFile(result.files.first);
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Gagal memilih gambar: $e')),
       );
     }
   }
@@ -885,21 +829,9 @@ class _JeonChatInputBarState extends State<JeonChatInputBar> {
               decoration: BoxDecoration(color: JeonColors.surface3, borderRadius: BorderRadius.circular(2)),
             ),
             const SizedBox(height: 6),
-            _plusMenuTile(Icons.video_library, 'Upload Video (Semua Format)', onTap: () {
-              Navigator.of(sheetContext).pop();
-              _pickVideoAttachment();
-            }),
-            _plusMenuTile(Icons.photo_library, 'Upload Foto & Gambar', onTap: () {
-              Navigator.of(sheetContext).pop();
-              _pickImageAttachment();
-            }),
             _plusMenuTile(Icons.insert_drive_file, 'Upload Dokumen / File', onTap: () {
               Navigator.of(sheetContext).pop();
               _pickDocumentAttachment();
-            }),
-            _plusMenuTile(Icons.image_search_rounded, 'Analisis Gambar', onTap: () {
-              Navigator.of(sheetContext).pop();
-              _pickAndAnalyzeImage();
             }),
             _plusMenuTile(Icons.folder_open_outlined, 'Tambah dari Library', onTap: () {
               Navigator.of(sheetContext).pop();
